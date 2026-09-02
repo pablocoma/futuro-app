@@ -11,8 +11,9 @@ están en `AGENTS.md`; no deben duplicarse aquí.
 - Contiene solo el bootstrap: `README.md`, `AGENTS.md`, `CLAUDE.md`,
   `.gitignore` y el harness de Claude Code (`.claude/settings.json` con hooks
   de sesión y denegación de `git add -A`/`git add .`).
-- Sin código todavía. Sin `dev` creada aún; el bootstrap se hizo directamente
-  sobre `main` porque es el commit fundacional del repositorio.
+- Sin código todavía. El bootstrap se hizo sobre `main` por ser el commit
+  fundacional; `dev` ya existe, creada desde ese mismo commit, y es donde se
+  desarrolla la Fase 0.5.
 - Las decisiones de arquitectura están cerradas en `ARCHITECTURE.md` del
   repositorio privado `Futuro`, no duplicadas aquí.
 
@@ -31,4 +32,4 @@ al script Ruby archivado en el repositorio privado
 
 Detalle completo en la sección "7. Selección de CV" y "14. Fases de entrega"
 de `ARCHITECTURE.md` (repositorio privado). El trabajo de esta fase se hace en
-una rama `dev` creada a partir de este commit.
+`dev`.
