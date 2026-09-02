@@ -1,0 +1,41 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(ls:*)"
+    ],
+    "deny": [
+      "Bash(git add -A:*)",
+      "Bash(git add --all:*)",
+      "Bash(git add .:*)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -n --rawfile readme README.md --rawfile next NEXT_SESSION.md '{hookSpecificOutput: {hookEventName: \"SessionStart\", additionalContext: (\"## README.md\\n\\n\" + $readme + \"\\n\\n## NEXT_SESSION.md\\n\\n\" + $next)}}'",
+            "statusMessage": "Cargando README.md y NEXT_SESSION.md..."
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '{\"systemMessage\": \"¿Cerraste algún hito esta sesión? Si es así, actualiza NEXT_SESSION.md (estado comprobado + próximo objetivo) antes de terminar.\"}'",
+            "statusMessage": "Comprobando NEXT_SESSION.md..."
+          }
+        ]
+      }
+    ]
+  }
+}

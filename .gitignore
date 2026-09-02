@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+
+# Entorno
+.env
+.env.*
+!.env.example
+
+# Docker / build
+*.log
+
+# Frontend (fases posteriores)
+node_modules/
+.next/
+
+# macOS
+.DS_Store
