@@ -31,6 +31,8 @@ normalización de verbos de contribución, por qué el README generado no
 lleva datos personales, qué se dejó fuera de alcance a propósito) está en
 `docs/decisions/fase-0.5-workflow-de-cvs.md`, no aquí.
 
+Commiteado en `dev` (local, sin `push` todavía).
+
 ## Siguiente objetivo: completar Fase 0.5 en el repositorio privado `Futuro`
 
 Falta, en `Futuro` (no aquí — su propio traspaso pide que ese trabajo se
