@@ -12,9 +12,16 @@ __pycache__/
 # Docker / build
 *.log
 
-# Frontend (fases posteriores)
+# Frontend
 node_modules/
 .next/
+next-env.d.ts
+*.tsbuildinfo
+
+# E2E
+test-results/
+playwright-report/
+.playwright/
 
 # macOS
 .DS_Store

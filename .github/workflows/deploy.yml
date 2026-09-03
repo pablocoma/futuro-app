@@ -1,0 +1,180 @@
+name: deploy
+
+# Rama `main`, que solo se toca por merge desde `dev`. Repite las
+# comprobaciones, publica las imágenes en GHCR y despliega en la VM de
+# Oracle.
+#
+# Estado: escrito y sin estrenar. La VM, el dominio y el cliente OAuth no
+# existen todavía; el paso de comprobación previa falla con un mensaje claro
+# en vez de dejar un deploy a medias. Lo que hay que provisionar está en
+# docs/deployment.md.
+#
+# No incluye el aviso por Telegram que menciona ARCHITECTURE.md §11: no hay
+# bot todavía, es Fase 3.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  preflight:
+    name: comprobación previa
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Verificar que los secretos del entorno existen
+        env:
+          HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+          USER: ${{ secrets.DEPLOY_SSH_USER }}
+          KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+          DOMAIN: ${{ secrets.APP_DOMAIN }}
+        run: |
+          set -euo pipefail
+          missing=()
+          for name in HOST USER KEY KNOWN_HOSTS DOMAIN; do
+            if [ -z "${!name:-}" ]; then missing+=("$name"); fi
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Faltan secretos del entorno 'production': ${missing[*]}"
+            echo "::error::Provisiona la VM y el dominio siguiendo docs/deployment.md"
+            exit 1
+          fi
+
+  verify:
+    name: comprobaciones
+    needs: preflight
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    name: publicar imágenes
+    needs: verify
+    runs-on: ubuntu-24.04-arm
+    strategy:
+      matrix:
+        service: [api, web]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: services/${{ matrix.service }}
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/futuro-${{ matrix.service }}:latest
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/futuro-${{ matrix.service }}:${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+  deploy:
+    name: desplegar en Oracle
+    needs: publish
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Preparar la clave SSH
+        env:
+          KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          # Se fija la huella del host en vez de aceptar cualquiera: sin
+          # esto el deploy confiaría en el primer servidor que respondiese.
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Copiar la definición del stack
+        env:
+          HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+          SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
+        run: |
+          set -euo pipefail
+          # Solo la topología y la config de Caddy. El .env de producción
+          # vive en la VM y no pasa nunca por CI.
+          scp -i ~/.ssh/id_ed25519 docker-compose.yml "$SSH_USER@$HOST:/opt/futuro/docker-compose.yml"
+          scp -i ~/.ssh/id_ed25519 caddy/Caddyfile "$SSH_USER@$HOST:/opt/futuro/caddy/Caddyfile"
+
+      - name: Desplegar
+        env:
+          HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+          SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
+          TAG: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$HOST" IMAGE_TAG="$TAG" bash -euo pipefail <<'REMOTE'
+            cd /opt/futuro
+            # El tag anterior se guarda antes de tocar nada: es lo que
+            # permite volver atrás sin depender de que GHCR liste versiones.
+            if [ -f .image_tag ]; then cp .image_tag .image_tag.previous; fi
+            echo "$IMAGE_TAG" > .image_tag
+            export IMAGE_TAG
+            # docker-compose.override.yml no existe en la VM: allí se usa la
+            # definición de producción tal cual.
+            docker compose pull
+            docker compose up -d --wait --wait-timeout 180
+            docker compose exec -T api alembic upgrade head
+          REMOTE
+
+      - name: Comprobar salud
+        id: health
+        env:
+          DOMAIN: ${{ secrets.APP_DOMAIN }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 12); do
+            status=$(curl -fsS "https://$DOMAIN/api/health" | jq -r .status || echo "")
+            if [ "$status" = "ok" ]; then
+              echo "Salud: ok"
+              exit 0
+            fi
+            echo "Intento $attempt: status='$status'"
+            sleep 10
+          done
+          echo "::error::La app no llegó a estado 'ok' tras el deploy."
+          exit 1
+
+      - name: Rollback al tag anterior
+        if: failure() && steps.health.outcome == 'failure'
+        env:
+          HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+          SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$HOST" bash -euo pipefail <<'REMOTE'
+            cd /opt/futuro
+            if [ ! -f .image_tag.previous ]; then
+              echo "No hay tag anterior al que volver (primer deploy)." >&2
+              exit 1
+            fi
+            IMAGE_TAG="$(cat .image_tag.previous)"
+            export IMAGE_TAG
+            cp .image_tag.previous .image_tag
+            docker compose up -d --wait --wait-timeout 180
+            # Las migraciones NO se revierten solas: un downgrade a ciegas
+            # puede perder datos. Si el fallo era de esquema se arregla a
+            # mano. Queda anotado como riesgo en docs/deployment.md.
+            echo "Rollback a $IMAGE_TAG hecho."
+          REMOTE

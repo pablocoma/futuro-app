@@ -1,0 +1,56 @@
+# Desarrollo local. Compose carga este fichero automáticamente sobre
+# docker-compose.yml, así que no hay una segunda definición de la topología
+# que pueda desincronizarse: solo lo que cambia.
+#
+# Lo que añade: bind mounts del código, recarga en caliente en api y web, el
+# puerto de Postgres expuesto al Mac, y Caddy en 8080 sin HTTPS.
+
+services:
+  caddy:
+    # En local Caddy escucha en :8080 dentro del contenedor (APP_DOMAIN), así
+    # que el puerto publicado tiene que ser el mismo a los dos lados. Sin
+    # HTTPS: no hay dominio ni certificado que resolver.
+    ports: !override
+      - "8080:8080"
+
+  api:
+    command:
+      - uvicorn
+      - futuro_api.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --reload
+      - --reload-dir
+      - /app/src
+    volumes:
+      # Solo el código: .venv se queda la del contenedor, que es la que
+      # coincide con uv.lock para linux/arm64.
+      - ./services/api/src:/app/src
+      - ./services/api/migrations:/app/migrations
+    environment:
+      ENV: development
+      LOG_LEVEL: DEBUG
+    ports:
+      - "8000:8000"
+
+  web:
+    build:
+      context: ./services/web
+      target: builder
+    # -H 0.0.0.0 para que el servidor de desarrollo acepte conexiones desde
+    # fuera del contenedor y no solo desde su propio localhost.
+    command: ["npm", "run", "dev", "--", "-H", "0.0.0.0"]
+    environment:
+      NODE_ENV: development
+      API_INTERNAL_URL: http://api:8000
+    volumes:
+      - ./services/web/src:/app/src
+      - ./services/web/next.config.ts:/app/next.config.ts
+    ports:
+      - "3000:3000"
+
+  postgres:
+    ports:
+      - "5432:5432"
