@@ -4,7 +4,7 @@
 
 .DEFAULT_GOAL := help
 .PHONY: help up down logs ps rebuild shell-api shell-web psql migrate \
-        check check-api check-web fmt e2e
+        migrate-check check check-api check-web fmt e2e
 
 help: ## Lista los objetivos disponibles
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -38,9 +38,19 @@ psql: ## Cliente psql contra el Postgres de local
 migrate: ## Aplica las migraciones pendientes
 	docker compose exec api alembic upgrade head
 
+# Alembic fuera del contenedor habla con el puerto que el override expone al
+# Mac, no con el host `postgres` de la red de Compose.
+ALEMBIC = cd services/api && POSTGRES_HOST=$${POSTGRES_HOST:-localhost} uv run alembic
+
+migrate-check: ## Comprueba que las migraciones son reversibles y no derivan
+	$(ALEMBIC) upgrade head
+	$(ALEMBIC) check
+	$(ALEMBIC) downgrade base
+	$(ALEMBIC) upgrade head
+
 check: check-api check-web ## Lint, tipos y tests de los dos servicios
 
-check-api: ## Harness de la API
+check-api: ## Harness de la API (necesita el postgres de `make up`)
 	cd services/api && uv sync --frozen
 	cd services/api && uv run ruff check .
 	cd services/api && uv run ruff format --check .
