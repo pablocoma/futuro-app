@@ -13,7 +13,10 @@ from typing import Literal
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from futuro_api.llm import cost
+
 Environment = Literal["development", "production"]
+LlmProvider = Literal["openai", "stub"]
 
 
 class Settings(BaseSettings):
@@ -51,6 +54,19 @@ class Settings(BaseSettings):
     # Origen público de la app, usado para construir el redirect de OAuth.
     public_base_url: str = "http://localhost:8080"
 
+    # Cola de trabajos.
+    redis_url: str = "redis://redis:6379/0"
+
+    # LLM. El valor por defecto es `stub` porque es el que hace que el
+    # harness y el e2e funcionen sin clave y sin gastar: el CI no tiene
+    # credenciales de OpenAI y no debería tenerlas. Que ese sea el valor por
+    # defecto no es un riesgo de producción, porque `ENV=production` lo
+    # rechaza igual que rechaza el bypass de autenticación.
+    llm_provider: LlmProvider = "stub"
+    openai_api_key: str = ""
+    openai_model: str = ""
+    openai_timeout_seconds: float = 120.0
+
     log_level: str = Field(default="INFO")
 
     @property
@@ -69,6 +85,11 @@ class Settings(BaseSettings):
         )
 
     @property
+    def llm_stubbed(self) -> bool:
+        """El cliente simulado solo existe fuera de producción."""
+        return self.llm_provider == "stub" and self.env != "production"
+
+    @property
     def bypass_active(self) -> bool:
         """El bypass solo existe en desarrollo, nunca en producción."""
         return self.dev_auth_bypass and self.env == "development"
@@ -76,6 +97,34 @@ class Settings(BaseSettings):
     @property
     def cookie_secure(self) -> bool:
         return self.env == "production"
+
+    @model_validator(mode="after")
+    def check_llm_requirements(self) -> Settings:
+        """Con `openai`, la clave y el modelo son obligatorios ya.
+
+        Y el modelo tiene que tener tarifa conocida: preferimos no arrancar
+        antes que registrar un coste que nadie sabe calcular. Falla en el
+        arranque y no en el primer trabajo encolado, que es donde el error
+        saldría en un log del worker y no en la cara de quien despliega.
+        """
+        if self.llm_provider != "openai":
+            return self
+        missing = [
+            name
+            for name, value in (
+                ("OPENAI_API_KEY", self.openai_api_key),
+                ("OPENAI_MODEL", self.openai_model),
+            )
+            if not value
+        ]
+        if missing:
+            raise ValueError(
+                "faltan variables obligatorias con LLM_PROVIDER=openai: "
+                + ", ".join(missing)
+            )
+        if not cost.is_priced(self.openai_model):
+            raise ValueError(str(cost.UnknownModel(self.openai_model)))
+        return self
 
     @model_validator(mode="after")
     def check_production_requirements(self) -> Settings:
@@ -102,6 +151,12 @@ class Settings(BaseSettings):
             )
         if not self.public_base_url.startswith("https://"):
             raise ValueError("PUBLIC_BASE_URL debe ser https:// con ENV=production")
+        if self.llm_provider != "openai":
+            raise ValueError(
+                "LLM_PROVIDER=stub no vale con ENV=production: las "
+                "extracciones serían simuladas y nada lo delataría en la "
+                "interfaz salvo el nombre del modelo"
+            )
         return self
 
 

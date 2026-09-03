@@ -48,6 +48,27 @@ def make_settings(**overrides: object) -> Settings:
     return Settings(**base)  # type: ignore[arg-type]
 
 
+def make_production_settings(**overrides: object) -> Settings:
+    """Unos ajustes de producción que sí arrancan.
+
+    Producción exige más que desarrollo, y la lista crece: credenciales de
+    OAuth, un secreto de sesión propio, HTTPS y, desde M1, un proveedor de
+    LLM real con un modelo de tarifa conocida. Tenerla en un solo sitio
+    evita que cada test que necesita un `ENV=production` válido se rompa
+    cada vez que se añade un requisito nuevo.
+    """
+    base: dict[str, object] = {
+        "env": "production",
+        "session_secret": "a-real-secret",
+        "public_base_url": "https://example.test",
+        "llm_provider": "openai",
+        "openai_api_key": "sk-inventada",
+        "openai_model": "gpt-5.6-terra",
+    }
+    base.update(overrides)
+    return make_settings(**base)
+
+
 def make_app(**overrides: object) -> FastAPI:
     return create_app(make_settings(**overrides))
 
