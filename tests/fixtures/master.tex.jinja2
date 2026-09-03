@@ -1,0 +1,66 @@
+\documentclass[10pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage{geometry}
+\usepackage{enumitem}
+
+\newcommand{\header}[4]{
+  \begin{center}
+    {\LARGE #1}\\
+    #2 \;|\; #3 \;|\; #4
+  \end{center}
+}
+
+\newcommand{\entry}[5]{
+  \textbf{#1} \hfill \textbf{#2}\\
+  #3 \hfill #4\\[-2pt]
+  #5
+}
+
+\newcommand{\skillrow}[2]{
+  \textbf{#1:} #2\\[1pt]
+}
+
+\begin{document}
+
+\header
+  {Jane Doe}
+  {Testville, ZZ}
+  {+00 000 000 000}
+  {jane.doe@example.test}
+
+\section{Profile}
+\VAR{profile}
+
+\section{Work Experience}
+\entry
+  {ACME TESTCO}
+  {Testville, ZZ}
+  {Test Engineer}
+  {Jan 2020 - Present}
+  {
+    \begin{itemize}
+\BLOCK{for bullet in role_bullets}
+      \item \VAR{bullet}
+\BLOCK{endfor}
+    \end{itemize}
+  }
+
+\section{Selected Project}
+Static synthetic project description, unchanged across variants.
+
+\section{Education}
+Static synthetic education facts, unchanged across variants.
+
+\section{Technical Skills}
+\BLOCK{for row in skill_rows}
+\skillrow{\VAR{row.label}}{\VAR{row.value}}
+\BLOCK{endfor}
+
+\section{Languages}
+Static synthetic languages, unchanged across variants.
+
+\section{Awards and Scholarships}
+Static synthetic awards, unchanged across variants.
+
+\end{document}

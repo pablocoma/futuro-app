@@ -1,0 +1,27 @@
+version: 1
+
+claim_rules:
+  professional_contribution_language:
+    allowed:
+      - contributed_to
+      - worked_on
+      - participated_in_development
+    blocked_without_specific_confirmation:
+      - owned
+      - led
+      - architected
+      - built_end_to_end
+
+base_variants:
+  widget_maker:
+    target_roles:
+      - widget_engineer
+    candidate_bullet_priority:
+      - role_scope_delivery
+      - widget_integration
+      - widget_experimentation
+
+  unreleased_variant:
+    target_roles:
+      - future_role
+    status: blocked_pending_role_research_and_evidence

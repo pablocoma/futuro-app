@@ -1,0 +1,56 @@
+version: 1
+language: en
+
+policy:
+  allowed_contribution_verbs:
+    - contributed_to
+    - worked_on
+    - participated_in
+  blocked_ownership_verbs:
+    - led
+    - owned
+    - architected
+    - built_end_to_end
+
+bullets:
+  - bullet_id: role_scope_delivery
+    text_en: >-
+      Contributed to client-facing delivery of test systems across
+      development, validation and delivery.
+    evidence_status: verified
+    cv_usage: eligible_with_internal_policy_check
+    role_variants:
+      - widget_maker
+
+  - bullet_id: widget_integration
+    text_en: >-
+      Worked on integrating test widgets into a shared platform.
+    evidence_status: verified
+    cv_usage: eligible_with_internal_policy_check
+    role_variants:
+      - widget_maker
+
+  - bullet_id: widget_experimentation
+    text_en: >-
+      Participated in preparing an experimentation framework for widget
+      testing.
+    evidence_status: verified
+    cv_usage: eligible_with_internal_policy_check
+    role_variants:
+      - widget_maker
+
+  - bullet_id: not_yet_cleared
+    text_en: >-
+      Contributed to a candidate project not yet cleared for CV use.
+    evidence_status: candidate
+    cv_usage: blocked
+    role_variants:
+      - widget_maker
+
+  - bullet_id: ownership_violation
+    text_en: >-
+      Led the redesign of the entire test platform end to end.
+    evidence_status: verified
+    cv_usage: eligible_with_internal_policy_check
+    role_variants:
+      - gadget_builder

@@ -1,0 +1,20 @@
+version: 1
+
+claim_rules:
+  professional_contribution_language:
+    allowed:
+      - contributed_to
+      - worked_on
+      - participated_in_development
+    blocked_without_specific_confirmation:
+      - owned
+      - led
+      - architected
+      - built_end_to_end
+
+base_variants:
+  gadget_builder:
+    target_roles:
+      - gadget_engineer
+    candidate_bullet_priority:
+      - ownership_violation

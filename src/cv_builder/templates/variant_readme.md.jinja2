@@ -1,0 +1,50 @@
+# CV base - {{ display_name }}
+
+**Carpeta generada por `cv-builder`.** No editar a mano: el siguiente build
+lo sobrescribe.
+
+## Familias de rol configuradas
+
+{% for role in target_roles %}
+- `{{ role }}`
+{% endfor %}
+
+## Cuándo usar esta variante
+
+{{ use_when }}
+
+## Posicionamiento del Profile
+
+> {{ profile }}
+
+## Bullets de experiencia profesional incluidos
+
+{% for bullet in role_bullets %}
+- {{ bullet }}
+{% endfor %}
+
+Los bullets anteriores están `verified` y aprobados para uso, sujetos a
+cualquier política interna aplicable. No atribuyen liderazgo, ownership ni
+autoría exclusiva.
+
+## Technical Skills de esta variante
+
+{% for row in skill_rows %}
+- **{{ row.label }}:** {{ row.value }}
+{% endfor %}
+
+## Qué no cambia respecto al CV maestro
+
+Identidad y contacto, empresa y fechas, educación, Selected Project,
+Languages y Awards se mantienen exactamente como en el maestro: esta
+variante no los toca.
+
+## Fuente canónica
+
+Este `.tex` es generado. Para cambios permanentes se edita el maestro, los
+YAML de contenido o la configuración de variantes, y se ejecuta de nuevo:
+
+```
+cv-builder build --master ... --bullet-bank ... --role-content ... \
+  --variants-config ... --output-dir ...
+```
