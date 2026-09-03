@@ -88,6 +88,36 @@ sesión, en paralelo, precisamente porque **no bloquea nada de código**.
 Cuando ese deploy corra en verde, lo único que cambia aquí es este bloque:
 M0 queda cerrado y no hay que retocar código.
 
+### Fase 1 · M1 — ingesta y extracción, en curso
+
+Tres de los cinco pasos, hechos y verificados en local. El porqué de cada
+decisión está en `docs/decisions/fase-1-nucleo.md`, no aquí.
+
+- **Esquema y primera migración** (`32b8eef`). Siete tablas: `companies`,
+  `offer_captures`, `offer_extractions`, `offer_requirements`,
+  `offer_anomalies`, `job_runs` y `llm_calls`. La inmutabilidad de las dos
+  capas del contrato la impone un trigger `BEFORE UPDATE`. Con esto entraron
+  el servicio de Postgres en el job de la API del CI y el ciclo
+  `upgrade`/`check`/`downgrade base`/`upgrade`, que es donde se comprueba la
+  reversibilidad que el rollback del deploy no cubre.
+- **Esquema de salida del modelo, prompt y reglas** (`613a3df`).
+  `offers/schemas.py`, `offers/prompt.py` y `offers/rules.py`. Toda cita se
+  verifica contra el texto pegado; las infracciones sin degradación honesta
+  rechazan la extracción entera; lo degradado se guarda en `corrections` y se
+  enseñará en pantalla.
+- **Módulo de LLM, coste y cliente simulado** (`a1433b3`). `llm/` con el
+  protocolo, la tabla de tarifas fechada del 2026-09-03, el cliente de
+  OpenAI y el `stub`. Modelo elegido: `gpt-5.6-terra`, ~$0,034 por oferta.
+
+Verificado en esta máquina el 2026-09-03: `make check-api` limpio con 103
+tests (ruff, `ruff format`, `mypy --strict`, pytest), `make migrate-check`
+limpio, y `alembic upgrade head` dentro del contenedor como lo hará el
+deploy.
+
+La clave de OpenAI está creada y puesta en el `.env` local, con presupuesto
+mensual y auto-recharge desactivado en la consola del proveedor. Con
+`LLM_PROVIDER=stub` —el valor de `.env.example`— nada de eso hace falta.
+
 ## Siguiente objetivo principal: Fase 1 — el núcleo de la aplicación
 
 Según `ARCHITECTURE.md` §14, Fase 1 es exactamente esto y nada más: pegar
@@ -104,11 +134,11 @@ una funcionando de punta a punta.
 - **M0 — Esqueleto desplegado.** Código hecho y verificado en local (ver
   arriba). Solo queda estrenar el deploy, que depende de provisionar
   infraestructura a mano y va por su propia sesión. **No bloquea M1.**
-- **M1 — Ingesta + extracción, sin scoring ni variante.** `POST
+- **M1 — Ingesta + extracción, sin scoring ni variante. En curso.** `POST
   /api/offers/ingest` solo con texto pegado, el canal más simple. El LLM
   produce las capas `capture` + `extraction` de
   `Futuro/docs/OFFER_DATA_CONTRACT.md`, con cita obligatoria por nota.
-  Pantalla "Oferta" mínima.
+  Pantalla "Oferta" mínima. Estado y pasos que faltan, más abajo.
 - **M2 — Scoring + recomendación de variante.** Capa `assessment` contra
   `Futuro/config/scoring_model.yaml`; el LLM compara la oferta contra
   `Futuro/cv/variants/README.md` y devuelve variante + confianza + motivo.
@@ -131,50 +161,38 @@ una funcionando de punta a punta.
 - Al cerrar cada rebanada, actualizar este archivo con el estado comprobado y
   ampliar `docs/decisions/fase-1-*.md` con qué se integró y por qué.
 
-## Siguiente paso: M1 — ingesta + extracción
+## Siguiente paso: cerrar M1
 
-Es el objetivo de la próxima sesión de desarrollo, y **no espera al deploy**:
-se trabaja contra el Compose local, igual que M0.
+Quedan dos pasos, en este orden, y ninguno espera al deploy.
 
-### Alcance
+### Paso 4 — persistencia y cola
 
-`POST /api/offers/ingest` recibiendo **solo texto pegado** —el canal más
-simple de los cinco; los demás son Fase 4— y produciendo, con el LLM, las
-capas `capture` y `extraction` de `Futuro/docs/OFFER_DATA_CONTRACT.md`. Más
-la pantalla "Oferta" mínima que las enseñe.
+- `offers/repository.py`: guardar una `ValidatedExtraction` —resolviendo los
+  nombres de empresa a filas de `companies` por su clave de deduplicación— y
+  leer la extracción vigente de una captura con sus hijas.
+- `jobs/tasks.py` y `jobs/worker.py`: la tarea de arq que llama al modelo,
+  valida y guarda, moviendo `job_runs` por sus estados y registrando la
+  llamada en `llm_calls`.
+- `redis` y `worker` en el compose, ahora sí: el worker comparte imagen con
+  la api y solo cambia el comando. `redis` con persistencia y volumen,
+  porque sin ella un reinicio deja trabajos en `queued` para siempre.
+- Detección de trabajo estancado: un `queued` que pase de un tiempo se
+  enseña como fallido en vez de quedarse girando.
 
-Fuera de M1, aunque se toque de refilón: el scoring y la recomendación de
-variante son M2, y la entrega del PDF es M3.
+### Paso 5 — endpoints y pantalla
 
-### Lo que el contrato exige y el código tiene que hacer cumplir
+- `POST /api/offers/ingest` (solo `paste`; 202 al encolar, 200 con la captura
+  existente si el sha256 repite), `GET /api/offers`, `GET
+  /api/offers/{id}` y `POST /api/offers/{id}/reextract`.
+- Pantallas `/capturar` (área de texto mínima) y `/ofertas/[id]`, con el
+  marcador de evidencia por campo: cita para `published`, razonamiento y
+  confianza para `inferred`, «sin datos» en el color `neg` para `absent`.
+  Sin barras ponderadas: eso es scoring, o sea M2.
+- E2E de Playwright con `LLM_PROVIDER=stub`: pegar un anuncio inventado y
+  comprobar que la pantalla enseña lo extraído.
 
-Estas no son preferencias, son reglas cerradas en el contrato. El patrón es
-el mismo que en `cv_builder`: **el LLM elige y cita, el código valida.**
+### Al cerrar M1
 
-- Cada campo de `extraction` lleva `evidence`: `published` obliga a
-  `source_quote`, `inferred` obliga a `reasoning` y `confidence`, `absent`
-  no se rellena nunca con una estimación.
-- Un requisito no puede marcarse `meets` sin `evidence_ref` a
-  `profile/evidence_bank.md` o al banco de bullets. Sin referencia, el
-  máximo es `partial`.
-- `posting_status` no vale `active_verified` sin `status_checked_at`.
-- Empresa que publica y empleador final son dos referencias distintas
-  (`posting_company_id`, `employer_company_id` + `employer_confidence`),
-  nunca un solo campo.
-- `capture` es inmutable, con `raw_text_sha256` para detectar reingestas.
-  `extraction` es inmutable y versionada por `prompt_version`: reextraer
-  crea fila nueva, no sobrescribe.
-- Los vocabularios cerrados (`role_family`, `seniority_label`, `work_mode`,
-  `contract_vehicle`, `posting_status`) salen de `config/objectives.yaml` y
-  del propio contrato.
-
-### Lo que M1 arrastra consigo
-
-- Las primeras tablas y por tanto la primera migración de Alembic, que en M0
-  quedó montado a propósito sin ninguna.
-- `redis` y `worker` en el compose: las llamadas al LLM son el primer
-  trabajo que justifica la cola.
-- El servicio de Postgres en el job de tests de la API del CI, que M0 dejó
-  fuera porque sus tests no lo necesitaban.
-- El módulo de LLM aislado con structured outputs (`ARCHITECTURE.md` §2), y
-  el registro de coste por ejecución.
+Ampliar `docs/decisions/fase-1-nucleo.md` con las decisiones de los pasos 4
+y 5, y reescribir este archivo con el estado comprobado y M2 como siguiente
+objetivo.
