@@ -53,6 +53,29 @@ jobs:
     defaults:
       run:
         working-directory: services/api
+    # Postgres entra aquí desde M1: los tests de esquema comprueban
+    # constraints y triggers, que no existen en ningún otro sitio. Los tests
+    # de la aplicación siguen sin necesitarlo —el camino degradado es uno de
+    # los casos que hay que cubrir— pero ya no son los únicos que hay.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: futuro
+          POSTGRES_USER: futuro
+          POSTGRES_PASSWORD: futuro
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U futuro -d futuro"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: futuro
+      POSTGRES_PASSWORD: futuro
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -63,10 +86,19 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run mypy
-      # Sin servicio de Postgres a propósito: los tests de M0 no lo
-      # necesitan —el caso "base de datos caída" es uno de los que hay que
-      # cubrir— y arrancar un contenedor que nadie usa solo alarga el CI.
-      # Cuando M1 traiga tablas y repositorios, aquí entra el servicio.
+
+      # El deploy hace `alembic upgrade head` y su rollback NO revierte
+      # esquema, así que la reversibilidad no se puede comprobar en
+      # producción: se comprueba aquí. `check` detecta que los modelos y las
+      # migraciones se hayan desincronizado; el ciclo hasta `base` y de
+      # vuelta prueba que cada `downgrade` deshace de verdad su `upgrade`.
+      - name: Migraciones
+        run: |
+          uv run alembic upgrade head
+          uv run alembic check
+          uv run alembic downgrade base
+          uv run alembic upgrade head
+
       - run: uv run pytest -q
 
   web:
