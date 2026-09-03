@@ -35,6 +35,16 @@ escribe ahí; no los duplica en este repositorio.
 - Al comenzar una nueva sesión, lee `README.md` y `NEXT_SESSION.md` antes de
   proponer o ejecutar cambios. Al cerrar un hito, actualiza `NEXT_SESSION.md`
   con el estado comprobado y el siguiente objetivo.
+- Al cerrar un hito de una fase (ver `ARCHITECTURE.md` del repositorio
+  privado para la numeración), añade o amplía en `docs/decisions/` el
+  fichero de esa fase (`fase-<n>-<slug>.md`) explicando **qué se integró y
+  por qué**: decisiones de implementación, desviaciones deliberadas
+  respecto a lo esperado y alcance dejado fuera a propósito. Es distinto de
+  `NEXT_SESSION.md`: ese archivo es estado operativo y se reescribe;
+  `docs/decisions/` es un registro que se acumula y no se poda. Este
+  repositorio documenta aquí solo decisiones de código; el repositorio
+  privado `Futuro` mantiene su propio `docs/decisions/` (o equivalente)
+  para las decisiones de su mitad (datos, plantillas, workflows de CI).
 - Las recomendaciones deben explicar sus supuestos y sus trade-offs.
 - Al arrancar un componente nuevo dentro de este repositorio (un servicio, un
   módulo con su propio ciclo de vida), su harness se configura como parte del

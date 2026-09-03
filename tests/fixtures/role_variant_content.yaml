@@ -1,0 +1,30 @@
+version: 1
+language: en
+
+variants:
+  widget_maker:
+    display_name: Widget Maker
+    use_when: >-
+      Ofertas de fabricación de widgets con énfasis en integración y
+      pruebas.
+    profile: >-
+      Test engineer with experience contributing to widget systems across
+      development, validation and delivery.
+    skills:
+      - label: Programming
+        value: Python, SQL
+      - label: Testing
+        value: pytest, contract testing
+
+  gadget_builder:
+    display_name: Gadget Builder
+    use_when: >-
+      Ofertas de construcción de gadgets con énfasis en fiabilidad.
+    profile: >-
+      Test engineer with experience contributing to gadget systems and
+      operational reliability.
+    skills:
+      - label: Programming
+        value: Python
+      - label: Reliability
+        value: monitoring, incident response

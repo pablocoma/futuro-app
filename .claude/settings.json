@@ -31,8 +31,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "echo '{\"systemMessage\": \"¿Cerraste algún hito esta sesión? Si es así, actualiza NEXT_SESSION.md (estado comprobado + próximo objetivo) antes de terminar.\"}'",
-            "statusMessage": "Comprobando NEXT_SESSION.md..."
+            "command": "echo '{\"systemMessage\": \"¿Cerraste algún hito esta sesión? Si es así: actualiza NEXT_SESSION.md (estado comprobado + próximo objetivo) y añade o amplía la entrada de la fase en docs/decisions/ (qué se integró y por qué) antes de terminar.\"}'",
+            "statusMessage": "Comprobando NEXT_SESSION.md y docs/decisions/..."
           }
         ]
       }

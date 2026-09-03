@@ -1,0 +1,44 @@
+[project]
+name = "cv-builder"
+version = "0.1.0"
+description = "Generador de variantes de CV a partir del maestro, el banco de bullets y la configuración de claim_rules."
+requires-python = ">=3.13"
+dependencies = [
+    "jinja2>=3.1",
+    "pydantic>=2.9",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+cv-builder = "cv_builder.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cv_builder"]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.13",
+    "pytest>=8.3",
+    "ruff>=0.7",
+    "types-pyyaml>=6.0",
+]
+
+[tool.ruff]
+line-length = 88
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+mypy_path = "src"
+files = ["src", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

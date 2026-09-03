@@ -1,0 +1,65 @@
+\documentclass[10pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage{geometry}
+\usepackage{enumitem}
+
+\newcommand{\header}[4]{
+  \begin{center}
+    {\LARGE #1}\\
+    #2 \;|\; #3 \;|\; #4
+  \end{center}
+}
+
+\newcommand{\entry}[5]{
+  \textbf{#1} \hfill \textbf{#2}\\
+  #3 \hfill #4\\[-2pt]
+  #5
+}
+
+\newcommand{\skillrow}[2]{
+  \textbf{#1:} #2\\[1pt]
+}
+
+\begin{document}
+
+\header
+  {Jane Doe}
+  {Testville, ZZ}
+  {+00 000 000 000}
+  {jane.doe@example.test}
+
+\section{Profile}
+Test engineer with experience contributing to widget systems across development, validation and delivery.
+
+\section{Work Experience}
+\entry
+  {ACME TESTCO}
+  {Testville, ZZ}
+  {Test Engineer}
+  {Jan 2020 - Present}
+  {
+    \begin{itemize}
+      \item Contributed to client-facing delivery of test systems across development, validation and delivery.
+      \item Worked on integrating test widgets into a shared platform.
+      \item Participated in preparing an experimentation framework for widget testing.
+    \end{itemize}
+  }
+
+\section{Selected Project}
+Static synthetic project description, unchanged across variants.
+
+\section{Education}
+Static synthetic education facts, unchanged across variants.
+
+\section{Technical Skills}
+\skillrow{Programming}{Python, SQL}
+\skillrow{Testing}{pytest, contract testing}
+
+\section{Languages}
+Static synthetic languages, unchanged across variants.
+
+\section{Awards and Scholarships}
+Static synthetic awards, unchanged across variants.
+
+\end{document}
