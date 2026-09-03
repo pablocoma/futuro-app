@@ -22,7 +22,7 @@ import pytest
 import sqlalchemy as sa
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy.ext.asyncio import AsyncConnection
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionmaker
 
 from futuro_api import db
 from futuro_api.config import Settings
@@ -178,4 +178,47 @@ async def connection(migrated_database: str) -> AsyncIterator[AsyncConnection]:
             finally:
                 await transaction.rollback()
     finally:
+        await engine.dispose()
+
+
+@pytest.fixture
+async def session(connection: AsyncConnection) -> AsyncIterator[AsyncSession]:
+    """Sesión atada a la conexión del test, que siempre se deshace.
+
+    Sirve para lo que no commitea: el repositorio hace `flush` y deja la
+    frontera de la transacción a quien llama, así que dentro de un test se
+    puede escribir, leer y descartarlo todo al terminar.
+    """
+    async with AsyncSession(bind=connection, expire_on_commit=False) as open_session:
+        yield open_session
+
+
+@pytest.fixture
+async def sessions(
+    migrated_database: str,
+) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
+    """Una fábrica de sesiones de verdad, con limpieza al terminar.
+
+    La tarea del worker abre y cierra sus propias sesiones y commitea varias
+    veces —el coste de la llamada se guarda aparte de la extracción, a
+    propósito— así que no se puede probar dentro de una transacción que se
+    deshace: hay que dejarla commitear y limpiar después. Probar la
+    estructura real de sus transacciones es parte de lo que interesa.
+
+    No mezclar con la fixture `session` en el mismo test: son conexiones
+    distintas, y lo que una no ha commiteado la otra no lo ve.
+    """
+    engine = db.create_engine(migrated_database)
+    try:
+        yield db.create_session_factory(engine)
+    finally:
+        async with engine.begin() as connection:
+            # `CASCADE` alcanza las tablas que las referencian, así que esto
+            # vacía también extracciones, requisitos, anomalías y llamadas.
+            await connection.execute(
+                sa.text(
+                    "TRUNCATE offer_captures, companies, job_runs "
+                    "RESTART IDENTITY CASCADE"
+                )
+            )
         await engine.dispose()

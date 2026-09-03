@@ -82,6 +82,11 @@ def _do_run_migrations(connection: Connection) -> None:
         connection=connection,
         target_metadata=target_metadata,
         include_name=include_name,
+        # En False por defecto, y por tanto ciego a que alguien cambie el
+        # valor por defecto de una columna sin migración. Se descubrió
+        # cambiando `now()` por `clock_timestamp()` y viendo que `check`
+        # seguía diciendo que todo estaba en orden.
+        compare_server_default=True,
     )
     with context.begin_transaction():
         context.run_migrations()

@@ -47,7 +47,7 @@ def upgrade() -> None:
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text("clock_timestamp()"),
             nullable=False,
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_companies")),
@@ -76,7 +76,7 @@ def upgrade() -> None:
         sa.Column(
             "captured_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text("clock_timestamp()"),
             nullable=False,
         ),
         sa.Column("raw_text", sa.Text(), nullable=False),
@@ -131,7 +131,7 @@ def upgrade() -> None:
         sa.Column(
             "queued_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text("clock_timestamp()"),
             nullable=False,
         ),
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
@@ -191,7 +191,7 @@ def upgrade() -> None:
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text("clock_timestamp()"),
             nullable=False,
         ),
         sa.CheckConstraint(
@@ -220,7 +220,7 @@ def upgrade() -> None:
         sa.Column(
             "extracted_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text("clock_timestamp()"),
             nullable=False,
         ),
         sa.Column("evidence", postgresql.JSONB(astext_type=sa.Text()), nullable=False),

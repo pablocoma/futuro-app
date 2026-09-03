@@ -2,8 +2,9 @@
 # docker-compose.yml, así que no hay una segunda definición de la topología
 # que pueda desincronizarse: solo lo que cambia.
 #
-# Lo que añade: bind mounts del código, recarga en caliente en api y web, el
-# puerto de Postgres expuesto al Mac, y Caddy en 8080 sin HTTPS.
+# Lo que añade: bind mounts del código, recarga en caliente en api, worker y
+# web, los puertos de Postgres y Redis expuestos al Mac, y Caddy en 8080 sin
+# HTTPS.
 
 services:
   caddy:
@@ -51,6 +52,25 @@ services:
     ports:
       - "3000:3000"
 
+  worker:
+    # `arq --watch` reinicia el worker al cambiar el código, igual que
+    # `--reload` en uvicorn. Sin esto habría que hacer `docker compose
+    # restart worker` en cada cambio, y se olvida.
+    command:
+      - arq
+      - futuro_api.jobs.worker.WorkerSettings
+      - --watch
+      - /app/src
+    volumes:
+      - ./services/api/src:/app/src
+    environment:
+      ENV: development
+      LOG_LEVEL: DEBUG
+
   postgres:
     ports:
       - "5432:5432"
+
+  redis:
+    ports:
+      - "6379:6379"
