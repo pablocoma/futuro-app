@@ -17,7 +17,12 @@ from itsdangerous import TimestampSigner
 from pydantic import ValidationError
 
 from futuro_api.auth import SESSION_USER_KEY
-from tests.conftest import ALLOWED, make_app, make_settings
+from tests.conftest import (
+    ALLOWED,
+    make_app,
+    make_production_settings,
+    make_settings,
+)
 
 
 def test_api_is_closed_by_default(client: TestClient) -> None:
@@ -37,54 +42,29 @@ def test_dev_bypass_injects_a_fixed_user() -> None:
 
 
 def test_dev_bypass_is_ignored_in_production() -> None:
-    settings = make_settings(
-        env="production",
-        dev_auth_bypass=True,
-        session_secret="a-real-secret",
-        public_base_url="https://example.test",
-    )
+    settings = make_production_settings(dev_auth_bypass=True)
     assert settings.dev_auth_bypass is True
     assert settings.bypass_active is False
 
 
 def test_production_requires_oauth_credentials() -> None:
     with pytest.raises(ValidationError, match="GOOGLE_CLIENT_ID"):
-        make_settings(
-            env="production",
-            google_client_id="",
-            session_secret="a-real-secret",
-            public_base_url="https://example.test",
-        )
+        make_production_settings(google_client_id="")
 
 
 def test_production_rejects_the_development_session_secret() -> None:
     with pytest.raises(ValidationError, match="SESSION_SECRET"):
-        make_settings(
-            env="production",
-            session_secret="dev-only-insecure-session-secret",
-            public_base_url="https://example.test",
-        )
+        make_production_settings(session_secret="dev-only-insecure-session-secret")
 
 
 def test_production_requires_https_base_url() -> None:
     with pytest.raises(ValidationError, match="PUBLIC_BASE_URL"):
-        make_settings(
-            env="production",
-            session_secret="a-real-secret",
-            public_base_url="http://example.test",
-        )
+        make_production_settings(public_base_url="http://example.test")
 
 
 def test_cookie_is_secure_only_in_production() -> None:
     assert make_settings().cookie_secure is False
-    assert (
-        make_settings(
-            env="production",
-            session_secret="a-real-secret",
-            public_base_url="https://example.test",
-        ).cookie_secure
-        is True
-    )
+    assert make_production_settings().cookie_secure is True
 
 
 def test_allowlist_is_parsed_case_insensitively() -> None:

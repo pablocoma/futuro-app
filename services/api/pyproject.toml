@@ -5,11 +5,13 @@ description = "API de futuro-app: ingesta de ofertas, scoring y selección de va
 requires-python = ">=3.13"
 dependencies = [
     "alembic>=1.19",
+    "arq>=0.28.0",
     "asyncpg>=0.31",
     "authlib>=1.8",
     "fastapi>=0.141",
     "httpx2>=2.12",
     "itsdangerous>=2.2",
+    "openai>=3.8.0",
     "pydantic-settings>=2.15",
     "sqlalchemy[asyncio]>=2.0.52",
     "uvicorn[standard]>=0.52",
