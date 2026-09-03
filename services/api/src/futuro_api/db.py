@@ -81,10 +81,20 @@ UuidPk = Annotated[
     ),
 ]
 
+# `clock_timestamp()` y no `now()`. `now()` devuelve la hora de **inicio de
+# la transacción**, así que dos filas insertadas en la misma transacción
+# comparten marca al milisegundo y el orden «la más reciente» queda
+# indeterminado: es justo lo que decide qué extracción está vigente y en qué
+# orden se listan las ofertas. `clock_timestamp()` es la hora real de cada
+# INSERT. Queda un empate teórico si dos caen en el mismo microsegundo, y
+# para eso las consultas desempatan por `id`, que es determinista aunque no
+# signifique nada.
 CreatedAt = Annotated[
     datetime,
     mapped_column(
-        sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        sa.DateTime(timezone=True),
+        nullable=False,
+        server_default=sa.text("clock_timestamp()"),
     ),
 ]
 

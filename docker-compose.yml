@@ -2,9 +2,10 @@
 # docker-compose.override.yml, que Compose carga solo, así que `make up`
 # levanta la misma topología con recarga en caliente.
 #
-# M0 monta cuatro servicios de los seis que describe ARCHITECTURE.md §4:
-# faltan `redis` y `worker`, que no tienen trabajo que hacer hasta que haya
-# llamadas al LLM (M1).
+# Los seis servicios de ARCHITECTURE.md §4. `redis` y `worker` entraron con
+# M1, que es cuando apareció el primer trabajo que justifica una cola: una
+# llamada al modelo tarda entre cinco y treinta segundos y nadie debe
+# esperarla con una petición HTTP abierta.
 
 name: futuro
 
@@ -48,8 +49,14 @@ services:
       DEV_AUTH_BYPASS: ${DEV_AUTH_BYPASS:-false}
       DEV_AUTH_EMAIL: ${DEV_AUTH_EMAIL:-dev@localhost}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
+      REDIS_URL: redis://redis:6379/0
+      LLM_PROVIDER: ${LLM_PROVIDER:-stub}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-}
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     healthcheck:
       # Sin curl en la imagen: se usa el Python que ya está dentro. Acepta
@@ -85,6 +92,71 @@ services:
     depends_on:
       - api
 
+  worker:
+    # Comparte imagen con `api` y solo cambia el comando: mismas
+    # dependencias, misma configuración, mismo cliente de LLM. Lo único que
+    # no hace es atender HTTP. Declara el mismo `build` que `api` para que
+    # un clon nuevo no dependa de que la imagen exista ya; con la misma
+    # etiqueta, el segundo build es un acierto de caché.
+    build:
+      context: ./services/api
+    image: ghcr.io/pablocoma/futuro-api:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    command: ["arq", "futuro_api.jobs.worker.WorkerSettings"]
+    environment:
+      ENV: ${ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-futuro}
+      POSTGRES_USER: ${POSTGRES_USER:-futuro}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-futuro}
+      REDIS_URL: redis://redis:6379/0
+      LLM_PROVIDER: ${LLM_PROVIDER:-stub}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-}
+      # El worker no atiende peticiones, así que no necesita nada de OAuth.
+      # Se le pasa el secreto de sesión porque `Settings` lo exige en
+      # producción, y es la misma clase de configuración para los dos.
+      SESSION_SECRET: ${SESSION_SECRET:-dev-only-insecure-session-secret}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      ALLOWED_EMAILS: ${ALLOWED_EMAILS:-}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # `arq --check` mira el latido que el worker escribe en Redis. El
+      # worker lo refresca cada quince segundos (`health_check_interval`),
+      # de ahí que comprobarlo cada treinta tenga sentido.
+      test: ["CMD", "arq", "futuro_api.jobs.worker.WorkerSettings", "--check"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    # Con persistencia y volumen a propósito. Sin ella, un reinicio de Redis
+    # vacía la cola y deja filas de `job_runs` en `queued` para siempre
+    # apuntando a trabajos que ya no existen. El barrido periódico las
+    # recoge, pero es mejor no perderlas.
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   postgres:
     image: postgres:17-alpine
     restart: unless-stopped
@@ -102,5 +174,6 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:
   caddy_data:
   caddy_config:
