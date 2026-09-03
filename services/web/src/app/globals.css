@@ -1,0 +1,34 @@
+@import "tailwindcss";
+
+/*
+ * Paleta "Plano técnico", decidida en docs/APP_SCREENS.md del repositorio
+ * privado: azul de plano con naranja complementario. Los nombres de token
+ * son los de ese documento para que la conversación de diseño y el CSS
+ * hablen igual.
+ *
+ * La app es dark-first y M0 solo trae esta paleta. El conmutador de tema
+ * (next-themes) llega cuando haya una paleta clara decidida; inventarla
+ * aquí sería tomar una decisión de diseño que no está tomada.
+ */
+@theme {
+  --color-bg: #0a101c;
+  --color-ink: #e3ebf6;
+  --color-ink2: #8c9fba;
+  --color-ink3: #53657e;
+  --color-acc: #ff7a45;
+  --color-pos: #4fc3d9;
+  --color-neg: #ffc04d;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", monospace;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background-color: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}

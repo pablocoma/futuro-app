@@ -1,0 +1,24 @@
+# Un solo origen para frontend y API: por eso no hay CORS y la cookie de
+# sesión es de primera parte.
+#
+# APP_DOMAIN vale `:8080` en local (HTTP, sin certificado) y el dominio real
+# en la VM, donde Caddy resuelve HTTPS con Let's Encrypt sin más
+# configuración.
+{$APP_DOMAIN} {
+	encode zstd gzip
+
+	# El orden importa: la ruta más específica primero, o `web` se comería
+	# también las peticiones de la API.
+	handle /api/* {
+		reverse_proxy api:8000
+	}
+
+	handle {
+		reverse_proxy web:3000
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

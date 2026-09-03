@@ -1,0 +1,12 @@
+{
+  "name": "futuro-e2e",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Smoke test de extremo a extremo contra el compose levantado.",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.57.0"
+  }
+}

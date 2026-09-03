@@ -1,0 +1,106 @@
+# Definición de producción. En local se aplica encima
+# docker-compose.override.yml, que Compose carga solo, así que `make up`
+# levanta la misma topología con recarga en caliente.
+#
+# M0 monta cuatro servicios de los seis que describe ARCHITECTURE.md §4:
+# faltan `redis` y `worker`, que no tienen trabajo que hacer hasta que haya
+# llamadas al LLM (M1).
+
+name: futuro
+
+services:
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      # En local vale `:8080`; en la VM es el dominio real, y entonces Caddy
+      # resuelve el certificado con Let's Encrypt sin más configuración.
+      APP_DOMAIN: ${APP_DOMAIN:-:8080}
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+      - web
+
+  api:
+    build:
+      context: ./services/api
+    image: ghcr.io/pablocoma/futuro-api:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      ENV: ${ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-futuro}
+      POSTGRES_USER: ${POSTGRES_USER:-futuro}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-futuro}
+      SESSION_SECRET: ${SESSION_SECRET:-dev-only-insecure-session-secret}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      ALLOWED_EMAILS: ${ALLOWED_EMAILS:-}
+      DEV_AUTH_BYPASS: ${DEV_AUTH_BYPASS:-false}
+      DEV_AUTH_EMAIL: ${DEV_AUTH_EMAIL:-dev@localhost}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      # Sin curl en la imagen: se usa el Python que ya está dentro. Acepta
+      # 200 y 503 porque 503 significa "la API vive, Postgres no contesta",
+      # y en ese caso el contenedor sano es justamente el que puede
+      # informar del fallo.
+      test:
+        - CMD
+        - python
+        - -c
+        - |
+          import urllib.request
+          try:
+              code = urllib.request.urlopen(
+                  "http://127.0.0.1:8000/api/health", timeout=3
+              ).status
+          except urllib.error.HTTPError as error:
+              code = error.code
+          raise SystemExit(0 if code in (200, 503) else 1)
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  web:
+    build:
+      context: ./services/web
+    image: ghcr.io/pablocoma/futuro-web:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      API_INTERNAL_URL: http://api:8000
+    depends_on:
+      - api
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-futuro}
+      POSTGRES_USER: ${POSTGRES_USER:-futuro}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-futuro}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-futuro} -d ${POSTGRES_DB:-futuro}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:

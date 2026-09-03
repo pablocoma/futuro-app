@@ -1,0 +1,1 @@
+"""API de futuro-app."""
