@@ -109,6 +109,96 @@ primer principio de `AGENTS.md` es que aquí no entran datos personales.
 `ARCHITECTURE.md` §15 ya lo listaba como mitigación; se monta ahora, no
 cuando haya algo que filtrar.
 
+### La cola y la persistencia
+
+**Decisión: el repositorio no hace `commit`.** La frontera de la transacción
+la decide quien llama, que es el único que sabe si el trabajo terminó. Un
+repositorio que commitea por su cuenta deja medias extracciones guardadas
+cuando el paso siguiente falla. Tampoco valida nada: lo que entra ya pasó
+por `rules.validate`, y esa es la única puerta.
+
+**Decisión: la llamada al modelo se hace fuera de la transacción que
+guarda.** Una petición de treinta segundos con una transacción abierta
+bloquearía filas todo ese rato para nada.
+
+**Decisión: el coste se registra antes de validar, en su propia
+transacción.** Si la validación rechaza la extracción, la llamada ya está
+pagada y el gasto tiene que constar igual. Registrarlo solo cuando el
+resultado sirve haría que el total mintiera justamente cuando el modelo se
+porta mal, que es cuando más interesa saber lo que cuesta.
+
+**Decisión: arq decide *cuándo* se reintenta y la tarea decide *si* tiene
+sentido reintentar.** Una negativa del modelo o una extracción que incumple
+el contrato darán lo mismo en el segundo intento: se marcan fallidas y no se
+relanzan. Un fallo de red sí se relanza, hasta tres intentos. Mientras la
+cola espera para reintentar, la fila vuelve a `queued` y no se queda en
+`running`: nadie está ejecutando nada, y la pantalla no debe decir lo
+contrario.
+
+**Decisión: la fila de `job_runs` se guarda y se commitea antes de encolar.**
+El orden no es el intuitivo, y el motivo es que el worker puede empezar a
+ejecutar el trabajo en el mismo instante en que se encola: si la fila no
+estuviera guardada, la tarea no encontraría su propio `job_run`. El riesgo
+que deja este orden es el contrario —si el encolado falla después del
+commit, queda una fila que nadie va a ejecutar— y eso lo recoge el barrido
+de trabajos estancados. Es el fallo que se prefiere: visible y recuperable,
+en lugar de un trabajo que se ejecuta contra una fila que no existe.
+
+**Decisión: un barrido periódico da por perdidos los trabajos que llevan
+quince minutos sin acabar.** Hace falta porque un trabajo puede desaparecer
+sin dejar rastro: si Redis se reinicia, la cola se vacía y la fila se queda
+en `queued` para siempre. Sin esto, la pantalla enseñaría «en cola» de por
+vida y nadie sabría que hay que reintentar. Corre como `cron` de arq cada
+cinco minutos y también al arrancar, porque el arranque es justo el momento
+posterior a un reinicio.
+
+**Decisión: Redis con persistencia y volumen.** Sin ella, un reinicio vacía
+la cola. El barrido lo recoge, pero es mejor no perder los trabajos que
+depender de que alguien los vuelva a lanzar.
+
+**Decisión: `clock_timestamp()` y no `now()` en los valores por defecto.**
+`now()` en Postgres devuelve la hora de **inicio de la transacción**, así que
+dos filas insertadas en la misma transacción comparten marca al
+milisegundo. Eso deja indeterminado el orden «la más reciente», que es justo
+lo que decide qué extracción está vigente y en qué orden se listan las
+ofertas. Se descubrió porque un test guardó dos extracciones seguidas y la
+que salía como vigente era aleatoria. Queda un empate teórico si dos filas
+caen en el mismo microsegundo, y para eso las consultas desempatan por `id`,
+que es determinista aunque no signifique nada.
+
+**Hallazgo: `alembic check` no compara valores por defecto salvo que se le
+pida.** El cambio anterior no habría aparecido como deriva de esquema. Se
+activa `compare_server_default`, que en este esquema no produce falsos
+positivos.
+
+**Decisión: los hijos de una extracción se cuelgan por la relación y no
+fijando la clave ajena a mano.** Además de dejar que SQLAlchemy ordene los
+INSERT, hace que el objeto devuelto traiga sus colecciones cargadas: leerlas
+no dispara una consulta perezosa, que en código asíncrono no es una consulta
+lenta sino una excepción.
+
+**Decisión: la paginación del listado va por la captura ancla y no por
+desplazamiento.** Un `OFFSET` se descuadra en cuanto entra una oferta nueva
+mientras alguien mira la segunda página: repite o salta una fila.
+
+**Decisión: la clave de deduplicación de empresas no toca los sufijos
+societarios.** «Astillero Nube SL» y «Astillero Nube S.L.» quedan como dos
+filas. Es el error que se prefiere: dos filas para una empresa se arreglan
+fusionándolas, mientras que una fusión falsa mezcla dos empresas distintas y
+no se deshace.
+
+**Decisión: el worker escribe su latido cada quince segundos.** El valor por
+defecto de arq es una hora, que para un `healthcheck` de Compose no sirve:
+el latido estaría rancio casi siempre y el contenedor se marcaría enfermo
+estando sano.
+
+**Decisión: los tests de la tarea usan una fábrica de sesiones real y
+limpian después.** La tarea commitea varias veces a propósito, así que no se
+puede probar dentro de una transacción que se deshace; y probar la
+estructura real de sus transacciones es parte de lo que interesa. Redis no
+aparece en los tests: la tarea se invoca directamente, porque lo que aporta
+arq es *cuándo* se reintenta, y eso no se prueba probando arq.
+
 ### Desviaciones deliberadas
 
 - **Aviso por Telegram del resultado del deploy** (`ARCHITECTURE.md` §11):
@@ -443,3 +533,9 @@ cliente se construye no depende solo de la variable.
   requisito de tecnología. Una cita corta es evidencia débil, pero no es una
   invención, y este módulo no distingue fuerza de evidencia: distingue
   verdad de mentira.
+- **El worker no se prueba arrancado.** Lo que se ejecuta en los tests es la
+  tarea, no arq. Que el worker arranque, coja trabajos de Redis y los
+  ejecute se comprobó a mano con el stack levantado, y lo cubrirá el E2E.
+- **El listado no filtra ni ordena.** Eso es la pantalla Pipeline, que no es
+  esta rebanada. El listado existe solo para que la pantalla de una oferta
+  sea alcanzable después de recargar.
