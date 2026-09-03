@@ -30,6 +30,11 @@ workflow de deploy. El deploy a la VM de Oracle está escrito y sin estrenar:
 la VM, el dominio y el cliente OAuth se provisionan a mano siguiendo
 `docs/deployment.md`.
 
+M1 (ingesta y extracción) está en curso: las tablas de las capas `capture` y
+`extraction` del contrato de datos, el módulo de LLM aislado con registro de
+coste por llamada, y las reglas que validan en Python lo que el modelo
+devuelve. Quedan la cola, los endpoints y la pantalla de la oferta.
+
 ## Desarrollo local
 
 ```bash
@@ -41,7 +46,14 @@ make e2e                  # smoke test contra el stack levantado
 
 No se instala nada en el Mac: todo corre en Compose. `make help` lista el
 resto de atajos. Con los valores de `.env.example`, `DEV_AUTH_BYPASS=true`
-inyecta un usuario fijo y no hace falta cuenta de Google.
+inyecta un usuario fijo y no hace falta cuenta de Google, y
+`LLM_PROVIDER=stub` simula las extracciones a partir del propio texto
+pegado, así que tampoco hace falta clave de OpenAI ni se gasta nada. Para
+extraer de verdad, `LLM_PROVIDER=openai` con su clave y su modelo.
+
+`make check` necesita el `postgres` de `make up` levantado: parte de los
+tests comprueban constraints y triggers, que no existen en ningún otro
+sitio.
 
 Las decisiones de arquitectura completas —stack, topología de repositorios,
 servicios, ingesta de ofertas, fases de entrega— están documentadas en
