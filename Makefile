@@ -10,8 +10,12 @@ help: ## Lista los objetivos disponibles
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
 		| awk 'BEGIN {FS = ":.*?## "} {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
 
-up: ## Levanta la app en local (http://localhost:8080)
-	docker compose up --build -d
+up: ## Levanta la app en local y aplica las migraciones
+	docker compose up --build -d --wait
+	# Las migraciones no se aplican solas al arrancar el contenedor: en
+	# producción es un paso del deploy, y aquí se hace explícito para que
+	# local y producción hagan lo mismo en el mismo orden.
+	docker compose exec -T api alembic upgrade head
 	@echo "→ http://localhost:8080"
 
 down: ## Para la app y borra los contenedores (los volúmenes se quedan)

@@ -6,7 +6,9 @@ vi.mock("next/headers", () => ({
   cookies: async () => ({ toString: () => cookieHeader.value }),
 }));
 
-const { getCurrentUser, getHealth } = await import("@/lib/api");
+const { getCurrentUser, getHealth, ingestOffer, listOffers } = await import(
+  "@/lib/api",
+);
 
 function mockFetch(status: number, body: unknown) {
   const fetchMock = vi.fn(async () => ({
@@ -77,5 +79,78 @@ describe("cliente de la API", () => {
       }),
     );
     await expect(getHealth()).resolves.toBeNull();
+  });
+});
+
+describe("escrituras", () => {
+  beforeEach(() => {
+    cookieHeader.value = "";
+    vi.unstubAllGlobals();
+  });
+
+  it("manda el anuncio como JSON con las cookies de la sesión", async () => {
+    cookieHeader.value = "futuro_session=abc";
+    const fetchMock = mockFetch(202, { capture_id: "una-oferta" });
+
+    const result = await ingestOffer({ raw_text: "un anuncio inventado" });
+
+    expect(result).toEqual({ ok: true, data: { capture_id: "una-oferta" } });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://api:8000/api/offers/ingest",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ raw_text: "un anuncio inventado" }),
+        headers: {
+          cookie: "futuro_session=abc",
+          "content-type": "application/json",
+        },
+      }),
+    );
+  });
+
+  it("devuelve el motivo de un error, no solo que falló", async () => {
+    // Quien acaba de pegar un anuncio tiene derecho a saber por qué no se
+    // ha guardado, así que una escritura fallida no puede devolver null y
+    // ya está, como hacen las lecturas.
+    mockFetch(503, { detail: "la cola de trabajos no está disponible" });
+
+    await expect(ingestOffer({ raw_text: "x" })).resolves.toEqual({
+      ok: false,
+      status: 503,
+      detail: "la cola de trabajos no está disponible",
+    });
+  });
+
+  it("saca un mensaje legible de un error de validación de FastAPI", async () => {
+    // Los 422 no traen `detail` como cadena sino como lista de problemas.
+    mockFetch(422, {
+      detail: [{ loc: ["body", "raw_text"], msg: "String should have at least 200 characters" }],
+    });
+
+    const result = await ingestOffer({ raw_text: "corto" });
+
+    expect(result).toMatchObject({
+      ok: false,
+      detail: "String should have at least 200 characters",
+    });
+  });
+
+  it("dice que no hay API cuando la petición ni sale", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("ECONNREFUSED");
+      }),
+    );
+
+    await expect(ingestOffer({ raw_text: "x" })).resolves.toMatchObject({
+      ok: false,
+      status: 0,
+    });
+  });
+
+  it("lista las ofertas capturadas", async () => {
+    mockFetch(200, [{ id: "una", title: "Ingeniero de Datos" }]);
+    await expect(listOffers()).resolves.toHaveLength(1);
   });
 });

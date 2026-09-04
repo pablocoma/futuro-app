@@ -19,6 +19,7 @@ from typing import Annotated, Literal
 from arq.connections import ArqRedis
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from futuro_api.jobs import queue as job_queue
@@ -127,14 +128,28 @@ async def ingest(
             extraction_id=extraction_id,
         )
 
-    capture = existing or await offers_repo.create_capture(
-        session,
-        source=vocab.SourceChannel.PASTE,
-        raw_text=payload.raw_text,
-        deadline=payload.deadline,
-        capture_note=payload.capture_note,
-    )
-    await session.commit()
+    capture = existing
+    if capture is None:
+        try:
+            capture = await offers_repo.create_capture(
+                session,
+                source=vocab.SourceChannel.PASTE,
+                raw_text=payload.raw_text,
+                deadline=payload.deadline,
+                capture_note=payload.capture_note,
+            )
+            await session.commit()
+        except IntegrityError:
+            # Otra petición capturó el mismo texto entre la comprobación de
+            # arriba y este INSERT. La unicidad de `raw_text_sha256` está en
+            # la base de datos justamente para que esto no dependa de quién
+            # llegue antes: se recoge la captura que ganó y se sigue como si
+            # se hubiera visto desde el principio. Pasa de verdad con un
+            # doble clic en el botón, y lo destapó el E2E en paralelo.
+            await session.rollback()
+            capture = await offers_repo.find_capture_by_sha256(session, raw_text_sha256)
+            if capture is None:  # pragma: no cover - la fila tiene que estar
+                raise
 
     run = await job_queue.enqueue_extraction(queue, session, capture.id)
     _, extraction_id = await _state_of(session, capture.id)
