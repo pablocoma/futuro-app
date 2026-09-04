@@ -199,6 +199,83 @@ estructura real de sus transacciones es parte de lo que interesa. Redis no
 aparece en los tests: la tarea se invoca directamente, porque lo que aporta
 arq es *cuándo* se reintenta, y eso no se prueba probando arq.
 
+### Los endpoints y las pantallas
+
+**Decisión: el endpoint declara en el tipo que solo acepta texto pegado.**
+`source` es un `Literal` con un solo valor, no el enum entero: mandar
+`source: "url"` da un 422 documentado en el OpenAPI en lugar de una
+aceptación silenciosa de algo que no hay código para procesar. Los otros
+cuatro canales existen en el contrato y en la columna, porque son Fase 4.
+
+**Decisión: un texto ya capturado devuelve 200 sin encolar nada.** Sería
+pagar dos veces por el mismo anuncio. Con `force_reextract` se encola
+igualmente, que es lo mismo que hace el endpoint de reextracción.
+
+**Hallazgo: la ingesta tenía una carrera, y la destapó el E2E en paralelo.**
+Dos peticiones con el mismo texto competían entre la comprobación de
+duplicado y el INSERT, y la perdedora se llevaba un 500 por violar la
+unicidad de `raw_text_sha256`. Pasa de verdad con un doble clic en el botón.
+Ahora se recoge la captura que ganó y se sigue como si se hubiera visto
+desde el principio: la unicidad está en la base de datos justamente para que
+esto no dependa de quién llegue antes. Tiene su test, forzando la carrera a
+mano.
+
+**Decisión: las listas de campos de la respuesta se derivan del esquema de
+salida del modelo.** Añadir un campo al contrato lo hace aparecer en la
+pantalla sin tocar la capa de vistas. Una lista escrita a mano se olvida, y
+el campo nuevo se guardaría sin que nadie lo viera nunca.
+
+**Decisión: el listado nombra al empleador final antes que a quien
+publica.** De un vistazo interesa para quién se trabajaría, no qué
+consultora publicó el anuncio.
+
+**Decisión: la API arranca aunque Redis no conteste.** Seguir sirviendo
+lecturas y `/api/health` es más útil que no levantar; lo único que se cae es
+pedir una extracción nueva, y eso responde 503 con un mensaje que lo dice.
+`/api/health` pasa a informar también del estado de la cola, y lo comprueba
+de verdad con un `ping` en vez de mirar si el objeto existe: el pool se crea
+al arrancar y Redis puede haberse caído después.
+
+**Decisión: sin `REDIS_URL` no se intenta conectar.** Con una URL que no
+responde, cada construcción de la aplicación en los tests pagaba los cinco
+reintentos de arq: cuarenta segundos de harness por nada. Con
+`ENV=production` la variable es obligatoria.
+
+**Decisión: la pantalla enseña la evidencia con el mismo peso que el dato.**
+La cita literal cuando consta, el razonamiento y la confianza cuando se
+dedujo, «sin datos» cuando no aparece. Esa distinción es el proyecto entero,
+así que no está escondida en un desplegable. Y se enseñan también las
+correcciones que el código le hizo al modelo, que son la cuenta de cuántas
+veces se salta las reglas.
+
+**Decisión: un campo ausente no lleva marca de evidencia a la derecha.** Su
+propio valor ya dice «sin datos» en el color de alerta, que es la
+micro-decisión de `docs/APP_SCREENS.md`. Ponerlo dos veces multiplicaba el
+ruido justo donde más filas ausentes hay —la compensación, que en Europa
+casi nunca se publica— sin añadir nada. Se vio mirando una captura de
+pantalla de la página real, no leyendo el código.
+
+**Decisión: la página se refresca pidiéndose otra vez al servidor, no
+sondeando la API desde el navegador.** Así el estado que se pinta y el que
+ve el backend son el mismo, y no hay una segunda forma de leer una oferta
+que pueda desincronizarse de la primera. El refresco se para solo cuando la
+extracción termina.
+
+**Decisión: el mínimo de longitud se comprueba también en el frontend.** No
+es desconfianza del backend, que sigue mandando: es idioma. El 422 de la API
+trae el mensaje de pydantic en inglés, y quien acaba de pegar un anuncio no
+tiene por qué leer eso.
+
+**Decisión: las etiquetas de los campos viven en el frontend.** Cómo se
+llama una columna en pantalla es presentación, y no tiene por qué viajar
+traducida en cada respuesta. Un campo sin etiqueta se pinta con su nombre
+técnico: feo, pero no lo oculta.
+
+**Decisión: las migraciones son un paso aparte también en local y en CI.**
+`make up` y el job de E2E las aplican explícitamente, igual que hace el
+deploy. El contenedor no migra al arrancar, y sin tablas la ingesta falla,
+que es justo lo que el E2E viene a comprobar.
+
 ### Desviaciones deliberadas
 
 - **Aviso por Telegram del resultado del deploy** (`ARCHITECTURE.md` §11):
@@ -539,3 +616,38 @@ cliente se construye no depende solo de la variable.
 - **El listado no filtra ni ordena.** Eso es la pantalla Pipeline, que no es
   esta rebanada. El listado existe solo para que la pantalla de una oferta
   sea alcanzable después de recargar.
+- **La pantalla «Capturar» no tiene los pasos de extracción en vivo** que
+  describe `docs/APP_SCREENS.md`. Es un área de texto y un botón. Los pasos
+  en vivo tienen sentido cuando haya más de un paso que enseñar; de momento
+  la espera se ve en la pantalla de la oferta, que se refresca sola.
+- **La pantalla de la oferta no tiene la composición ponderada.** El ancho
+  de cada barra es el peso de la dimensión en el modelo de scoring, así que
+  necesita el scoring: es M2.
+- **El listado no es la pantalla Pipeline.** Ni tabla densa, ni mapa valor ×
+  probabilidad, ni kanban: eso también necesita el scoring. Es una lista
+  para que una oferta siga siendo alcanzable después de recargar.
+- **Siguen fuera shadcn/ui, TanStack, Motion, Sonner, cmdk, Recharts, Zod y
+  `openapi-typescript`.** Los tipos del cliente se escriben a mano, que para
+  cinco respuestas es más barato que montar la generación desde el OpenAPI.
+  Cuando el número de endpoints crezca, esa decisión cambia.
+
+### Verificación en esta máquina, 2026-09-04
+
+- `make check`: 148 tests de la API y 10 del frontend; ruff, `ruff format`,
+  `mypy --strict`, eslint y `tsc --noEmit` limpios.
+- `make migrate-check`: `upgrade`, `check`, `downgrade base` y `upgrade`
+  otra vez, sin deriva.
+- `make up`: los seis servicios de `ARCHITECTURE.md` §4 sanos por primera
+  vez, incluidos `redis` y `worker`.
+- `make e2e`: los 6 tests de Playwright en verde, incluido el recorrido
+  entero —pegar, extraer, ver— contra el stack levantado.
+- Una oferta inventada encolada desde la API y procesada por el worker, con
+  sus requisitos y su coste en la base de datos.
+- La pantalla de la oferta revisada en una captura real, no solo por sus
+  tests.
+
+**Sin verificar, y no se puede desde aquí:** una extracción con el modelo de
+verdad. Todo lo anterior corre con `LLM_PROVIDER=stub`, que es lo que
+permite que el harness y el E2E sean deterministas y gratis. La primera
+llamada real a OpenAI la hace Pablo cuando quiera, con su clave y su
+presupuesto puestos.

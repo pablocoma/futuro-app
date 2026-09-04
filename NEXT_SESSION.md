@@ -1,6 +1,6 @@
 # Traspaso a la siguiente sesión
 
-Última actualización: 2026-09-03.
+Última actualización: 2026-09-04.
 
 Este archivo contiene el estado operativo del proyecto. Las reglas duraderas
 están en `AGENTS.md`; no deben duplicarse aquí.
@@ -88,35 +88,41 @@ sesión, en paralelo, precisamente porque **no bloquea nada de código**.
 Cuando ese deploy corra en verde, lo único que cambia aquí es este bloque:
 M0 queda cerrado y no hay que retocar código.
 
-### Fase 1 · M1 — ingesta y extracción, en curso
+### Fase 1 · M1 — ingesta y extracción, cerrada el 2026-09-04
 
-Tres de los cinco pasos, hechos y verificados en local. El porqué de cada
-decisión está en `docs/decisions/fase-1-nucleo.md`, no aquí.
+Funciona de punta a punta desde el navegador: pegar un anuncio, verlo
+extraerse y ver lo extraído con la evidencia de cada campo. El porqué de
+cada decisión está en `docs/decisions/fase-1-nucleo.md`, no aquí.
 
-- **Esquema y primera migración** (`32b8eef`). Siete tablas: `companies`,
-  `offer_captures`, `offer_extractions`, `offer_requirements`,
-  `offer_anomalies`, `job_runs` y `llm_calls`. La inmutabilidad de las dos
-  capas del contrato la impone un trigger `BEFORE UPDATE`. Con esto entraron
-  el servicio de Postgres en el job de la API del CI y el ciclo
-  `upgrade`/`check`/`downgrade base`/`upgrade`, que es donde se comprueba la
-  reversibilidad que el rollback del deploy no cubre.
-- **Esquema de salida del modelo, prompt y reglas** (`613a3df`).
-  `offers/schemas.py`, `offers/prompt.py` y `offers/rules.py`. Toda cita se
-  verifica contra el texto pegado; las infracciones sin degradación honesta
-  rechazan la extracción entera; lo degradado se guarda en `corrections` y se
-  enseñará en pantalla.
-- **Módulo de LLM, coste y cliente simulado** (`a1433b3`). `llm/` con el
-  protocolo, la tabla de tarifas fechada del 2026-09-03, el cliente de
-  OpenAI y el `stub`. Modelo elegido: `gpt-5.6-terra`, ~$0,034 por oferta.
+- **El esquema.** Siete tablas: `companies`, `offer_captures`,
+  `offer_extractions`, `offer_requirements`, `offer_anomalies`, `job_runs` y
+  `llm_calls`, en la migración `0001`. Las dos capas del contrato son
+  inmutables por un trigger `BEFORE UPDATE`, no por convención.
+- **El código que valida.** `offers/rules.py`: toda cita se verifica contra
+  el texto pegado, las infracciones sin degradación honesta rechazan la
+  extracción entera, y lo degradado se guarda en `corrections` y se enseña
+  en pantalla. El esquema de salida del modelo no tiene `status_checked_at`
+  ni los campos del cruce con el banco de evidencias: lo que el modelo no
+  puede saber, no se le pregunta.
+- **El módulo de LLM.** `llm/` con el protocolo, la tabla de tarifas fechada
+  del 2026-09-03, el cliente de OpenAI y el `stub`. Modelo:
+  `gpt-5.6-terra`, unos 0,034 $ por oferta.
+- **La cola.** `redis` y `worker` en el compose, con la tarea de arq, el
+  registro de coste por llamada y un barrido de trabajos perdidos.
+- **Los endpoints y las pantallas.** `POST /api/offers/ingest` (solo texto
+  pegado), el listado, el detalle y la reextracción; `/capturar`,
+  `/ofertas` y `/ofertas/[id]`.
 
-Verificado en esta máquina el 2026-09-03: `make check-api` limpio con 103
-tests (ruff, `ruff format`, `mypy --strict`, pytest), `make migrate-check`
-limpio, y `alembic upgrade head` dentro del contenedor como lo hará el
-deploy.
+Verificado en esta máquina el 2026-09-04: `make check` limpio (148 tests de
+la API, 10 del frontend), `make migrate-check` limpio, `make up` con los
+seis servicios de `ARCHITECTURE.md` §4 sanos por primera vez, y `make e2e`
+con los 6 tests de Playwright en verde, incluido el recorrido entero.
 
-La clave de OpenAI está creada y puesta en el `.env` local, con presupuesto
-mensual y auto-recharge desactivado en la consola del proveedor. Con
-`LLM_PROVIDER=stub` —el valor de `.env.example`— nada de eso hace falta.
+**Lo único no verificado, y no se puede desde aquí:** una extracción con el
+modelo de verdad. Todo corre con `LLM_PROVIDER=stub`, que es lo que hace el
+harness determinista y gratis. La clave de OpenAI está creada y en el `.env`
+local, con presupuesto mensual y auto-recharge desactivado; la primera
+llamada real la hace Pablo cuando quiera poniendo `LLM_PROVIDER=openai`.
 
 ## Siguiente objetivo principal: Fase 1 — el núcleo de la aplicación
 
@@ -134,11 +140,8 @@ una funcionando de punta a punta.
 - **M0 — Esqueleto desplegado.** Código hecho y verificado en local (ver
   arriba). Solo queda estrenar el deploy, que depende de provisionar
   infraestructura a mano y va por su propia sesión. **No bloquea M1.**
-- **M1 — Ingesta + extracción, sin scoring ni variante. En curso.** `POST
-  /api/offers/ingest` solo con texto pegado, el canal más simple. El LLM
-  produce las capas `capture` + `extraction` de
-  `Futuro/docs/OFFER_DATA_CONTRACT.md`, con cita obligatoria por nota.
-  Pantalla "Oferta" mínima. Estado y pasos que faltan, más abajo.
+- **M1 — Ingesta + extracción, sin scoring ni variante. Cerrada** el
+  2026-09-04 (ver arriba).
 - **M2 — Scoring + recomendación de variante.** Capa `assessment` contra
   `Futuro/config/scoring_model.yaml`; el LLM compara la oferta contra
   `Futuro/cv/variants/README.md` y devuelve variante + confianza + motivo.
@@ -161,38 +164,45 @@ una funcionando de punta a punta.
 - Al cerrar cada rebanada, actualizar este archivo con el estado comprobado y
   ampliar `docs/decisions/fase-1-*.md` con qué se integró y por qué.
 
-## Siguiente paso: cerrar M1
+## Siguiente paso: M2 — scoring y recomendación de variante
 
-Quedan dos pasos, en este orden, y ninguno espera al deploy.
+Según el troceo, M2 es la capa `assessment` del contrato de datos y la
+elección de variante de CV. No espera al deploy, igual que M1.
 
-### Paso 4 — persistencia y cola
+### Alcance
 
-- `offers/repository.py`: guardar una `ValidatedExtraction` —resolviendo los
-  nombres de empresa a filas de `companies` por su clave de deduplicación— y
-  leer la extracción vigente de una captura con sus hijas.
-- `jobs/tasks.py` y `jobs/worker.py`: la tarea de arq que llama al modelo,
-  valida y guarda, moviendo `job_runs` por sus estados y registrando la
-  llamada en `llm_calls`.
-- `redis` y `worker` en el compose, ahora sí: el worker comparte imagen con
-  la api y solo cambia el comando. `redis` con persistencia y volumen,
-  porque sin ella un reinicio deja trabajos en `queued` para siempre.
-- Detección de trabajo estancado: un `queued` que pase de un tiempo se
-  enseña como fallido en vez de quedarse girando.
+- **Capa `assessment`**, recalculable, contra
+  `Futuro/config/scoring_model.yaml`. La propiedad que justifica separarla
+  ya está montada: repuntuar el histórico es recorrer la base de datos, no
+  volver a pagar la extracción de cada oferta.
+- **El LLM juzga y el código calcula.** El modelo pone la nota de cada
+  dimensión y la cita que la sostiene; la media ponderada, la
+  renormalización, la cobertura, el cubo de cartera y el nivel de esfuerzo
+  los calcula el código. Una nota sin cita es inválida y su dimensión queda
+  sin puntuar. El código nunca acepta un `value_score` calculado por el
+  modelo.
+- **Recomendación de variante**: el LLM compara la oferta con
+  `Futuro/cv/variants/README.md` y devuelve variante, confianza y motivo.
+  No redacta nada: elige entre cinco documentos que ya existen.
+- **La pantalla de la oferta gana su composición ponderada**: el ancho de
+  cada barra es el peso de la dimensión y el alto es la nota, con un hueco
+  rayado para lo que no se pudo puntuar.
 
-### Paso 5 — endpoints y pantalla
+### Lo que M2 arrastra consigo
 
-- `POST /api/offers/ingest` (solo `paste`; 202 al encolar, 200 con la captura
-  existente si el sha256 repite), `GET /api/offers`, `GET
-  /api/offers/{id}` y `POST /api/offers/{id}/reextract`.
-- Pantallas `/capturar` (área de texto mínima) y `/ofertas/[id]`, con el
-  marcador de evidencia por campo: cita para `published`, razonamiento y
-  confianza para `inferred`, «sin datos» en el color `neg` para `absent`.
-  Sin barras ponderadas: eso es scoring, o sea M2.
-- E2E de Playwright con `LLM_PROVIDER=stub`: pegar un anuncio inventado y
-  comprobar que la pantalla enseña lo extraído.
+- La lectura de `Futuro/config/scoring_model.yaml` y de
+  `Futuro/cv/variants/README.md`, que son los primeros datos del
+  repositorio privado que la aplicación necesita. Decidir si eso se
+  adelanta aquí o se deja para el clon de M3 es la primera pregunta de la
+  rebanada.
+- Con ello, los campos `match`, `evidence_ref` y `cv_action` de
+  `offer_requirements`, que M1 dejó a NULL a propósito. La regla que impide
+  marcar `meets` sin referencia ya está escrita y probada en
+  `rules.enforce_match_rule`; solo hay que empezar a llamarla con datos.
+- Un segundo tipo de trabajo en la cola, que es lo que justificó que
+  `job_runs` y `llm_calls` fueran dos tablas.
 
-### Al cerrar M1
+### Al cerrar M2
 
-Ampliar `docs/decisions/fase-1-nucleo.md` con las decisiones de los pasos 4
-y 5, y reescribir este archivo con el estado comprobado y M2 como siguiente
-objetivo.
+Ampliar `docs/decisions/fase-1-nucleo.md` y reescribir este archivo con el
+estado comprobado y M3 como siguiente objetivo.
