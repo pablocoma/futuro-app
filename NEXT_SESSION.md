@@ -1,6 +1,6 @@
 # Traspaso a la siguiente sesión
 
-Última actualización: 2026-09-05 (M2 cerrada y estrenada con el modelo real).
+Última actualización: 2026-09-05 (M2 cerrada, estrenada con el modelo real, y al día con el modelo de scoring v2).
 
 Este archivo contiene el estado operativo del proyecto. Las reglas duraderas
 están en `AGENTS.md`; no deben duplicarse aquí.
@@ -184,13 +184,24 @@ llamada sin estrenar en Fase 1.
 Enseñó tres cosas, todas en `docs/decisions/fase-1-nucleo.md`: que el cero
 se pintaba como una columna vacía (arreglado), que dos aserciones del E2E
 estaban atadas al repositorio sintético (arreglado, ahora pasa contra los
-dos), y un **cuarto hueco del modelo de scoring** que es el más importante
-de los cuatro: `expected_net_savings`, que pesa 20 sobre 100, quedó sin
-puntuar **aunque el anuncio publicaba la banda salarial**, porque sus anclas
-están escritas en euros de ahorro y llegar del bruto al ahorro exige estimar
-fiscalidad y coste de vida, que `missing_data.never` prohíbe. Puede quedar
-sin puntuar casi siempre. La salida es de `Futuro`: reescribir esas anclas
-en términos de bruto, o darle al modelo una fuente que pueda citar.
+dos), y un cuarto hueco del modelo de scoring.
+
+**Los cuatro huecos están cerrados.** `Futuro` publicó
+`config/scoring_model.yaml` **v2** el 2026-09-05 y este repositorio
+implementó las tres mitades de código que hacían falta: `very_low` va a
+`aspirational`, el orden de los cubos queda confirmado, y la condición de
+`cheap` se estrecha para que `full` deje de ser inalcanzable. El renombrado
+de `expected_net_savings` a `gross_compensation_vs_baseline` no necesitó
+código —los nombres de dimensión son vocabulario libre—, y repuntuada la
+misma oferta con v2 esa dimensión sacó un 4 donde antes quedaba sin puntuar.
+
+**Lo que queda abierto de ahí, y es decisión de Pablo:** repuntuar la misma
+oferta movió dos dimensiones cuyas anclas no habían cambiado —una de ellas
+dos puntos sobre un peso de 20—. Es variación del modelo:
+`llm/openai_client.py` no fija `temperature` ni `seed`. No se ha tocado
+porque `gpt-5.6-terra` razona y los modelos de razonamiento no siempre
+aceptan `temperature`; fijarla a ciegas podría romper el único camino que
+funciona. Probarlo cuesta una llamada.
 
 **Aviso para cuando se abra el PR de `dev` a `main`:** el CI de M1
 (`fbed4ce`) se quedó en rojo por gitleaks, con un falso positivo
