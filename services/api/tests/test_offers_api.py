@@ -14,13 +14,14 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from futuro_api.assessment import calls as assessment_calls
 from futuro_api.jobs import tasks
 from futuro_api.jobs.tasks import extract_offer
 from futuro_api.llm.stub import StubClient
 from futuro_api.offers import extraction, schemas
 from futuro_api.offers import repository as offers_repo
 from futuro_api.offers import vocabularies as vocab
-from tests.conftest import FakeQueue, client_with_queue
+from tests.conftest import DATA_REPO, FakeQueue, client_with_queue, make_settings
 from tests.synthetic import ADVERT, absent, good_draft, published
 
 OTRO_ANUNCIO = (
@@ -416,3 +417,251 @@ async def test_two_simultaneous_pastes_of_the_same_advert_do_not_collide(
     assert response.status_code == 202
     assert response.json()["capture_id"] == first["capture_id"]
     assert len(client.get("/api/offers").json()) == 1
+
+
+# ---------------------------------------------------------------------------
+# La puntuación en la respuesta del detalle
+# ---------------------------------------------------------------------------
+
+
+async def _score(sessions: async_sessionmaker[AsyncSession], job_run_id: str) -> None:
+    """Ejecuta la tarea de puntuación de verdad, contra el repo sintético."""
+    await tasks.assess_offer(
+        {
+            "sessions": sessions,
+            "llm": StubClient(
+                {
+                    assessment_calls.SCORING_PURPOSE: assessment_calls.canned_scoring,
+                    assessment_calls.VARIANT_PURPOSE: assessment_calls.canned_variant,
+                }
+            ),
+            "settings": make_settings(data_repo_path=str(DATA_REPO)),
+            "job_try": 1,
+        },
+        job_run_id,
+    )
+
+
+async def _extracted_and_scored(
+    client: TestClient, sessions: async_sessionmaker[AsyncSession]
+) -> str:
+    """Una oferta pegada, extraída y puntuada por los caminos reales."""
+    ingested = _ingest(client).json()
+    await _extract(sessions, ingested["job_run_id"])
+    queued = client.post(f"/api/offers/{ingested['capture_id']}/assess").json()
+    await _score(sessions, queued["job_run_id"])
+    return str(ingested["capture_id"])
+
+
+async def test_an_offer_without_an_extraction_cannot_be_assessed_yet(
+    api: tuple[TestClient, FakeQueue],
+) -> None:
+    """409 y no 404: la oferta existe, lo que no existe es qué puntuar.
+
+    Un 404 haría pensar que la URL está mal.
+    """
+    client, _ = api
+    ingested = _ingest(client).json()
+    response = client.post(f"/api/offers/{ingested['capture_id']}/assess")
+    assert response.status_code == 409
+    assert "nada que puntuar" in response.json()["detail"]
+
+
+def test_assessing_an_offer_that_does_not_exist_is_a_404(
+    api: tuple[TestClient, FakeQueue],
+) -> None:
+    client, _ = api
+    response = client.post("/api/offers/00000000-0000-0000-0000-000000000000/assess")
+    assert response.status_code == 404
+
+
+async def test_an_unscored_offer_says_so_without_inventing_anything(
+    api: tuple[TestClient, FakeQueue],
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    client, _ = api
+    ingested = _ingest(client).json()
+    await _extract(sessions, ingested["job_run_id"])
+
+    body = client.get(f"/api/offers/{ingested['capture_id']}").json()
+    assert body["assessment_status"] == "none"
+    assert body["assessment"] is None
+    assert body["variant_recommendation"] is None
+    # Y la extracción sigue estando: una cosa no depende de la otra.
+    assert body["extraction"] is not None
+
+
+async def test_the_detail_carries_the_weighted_composition(
+    api: tuple[TestClient, FakeQueue],
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    """La pantalla no hace aritmética: recibe el ancho y el alto ya hechos.
+
+    Si dividiera pesos para sacar anchos, habría dos sitios donde se calcula
+    lo mismo, y el día que discreparan el dibujo diría una cosa y la
+    puntuación otra.
+    """
+    client, _ = api
+    capture_id = await _extracted_and_scored(client, sessions)
+
+    body = client.get(f"/api/offers/{capture_id}").json()
+    assert body["assessment_status"] == "succeeded"
+    assessment = body["assessment"]
+
+    # Las cuatro dimensiones del modelo sintético, en su orden, puntuadas o
+    # no: ocultar las que no se pudieron puntuar es lo que la pantalla tiene
+    # prohibido hacer.
+    dimensions = assessment["dimensions"]
+    assert [d["dimension"] for d in dimensions] == [
+        "ahorro_estimado",
+        "aprendizaje",
+        "ubicacion",
+        "encaje_de_rol",
+    ]
+    # Los anchos suman uno: son la fracción del peso **total**, así que la
+    # barra ancha y vacía enseña cuánto peso se perdió.
+    assert sum(d["weight_share"] for d in dimensions) == pytest.approx(1.0)
+    scored = [d for d in dimensions if d["score"] is not None]
+    unscored = [d for d in dimensions if d["score"] is None]
+    assert scored and unscored
+    for dimension in scored:
+        assert dimension["citation"], "una nota sin cita no debería haber entrado"
+        assert dimension["score_share"] == pytest.approx(dimension["score"] / 5)
+    for dimension in unscored:
+        assert dimension["unscored_reason"]
+        assert dimension["score_share"] is None
+
+
+async def test_the_detail_carries_the_gates_and_what_the_code_computed(
+    api: tuple[TestClient, FakeQueue],
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    client, _ = api
+    capture_id = await _extracted_and_scored(client, sessions)
+
+    assessment = client.get(f"/api/offers/{capture_id}").json()["assessment"]
+    assert [g["gate"] for g in assessment["gates"]] == [
+        "permiso_de_trabajo",
+        "suelo_de_ahorro",
+        "condiciones_aceptables",
+    ]
+    # `value_score` viaja como el texto exacto de la base de datos, igual
+    # que los importes en M1: es la puntuación, no geometría.
+    assert assessment["value_score"] == "3.00"
+    assert assessment["coverage"] == "0.700"
+    assert assessment["effort_tier"] in {"full", "standard", "cheap", "skip"}
+    assert assessment["source"] == "llm"
+    assert len(assessment["scoring_model_sha256"]) == 64
+    # Cero y no nulo: el cliente simulado sí llama, pero no cobra. «No
+    # consta» sería nulo, y es lo que devuelve un assessment recalculado.
+    assert assessment["cost_usd"] == "0.000000"
+
+
+async def test_the_detail_carries_the_recommended_variant_with_its_reason(
+    api: tuple[TestClient, FakeQueue],
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    """`ARCHITECTURE.md` §7: la app enseña *ese razonamiento* junto al PDF."""
+    client, _ = api
+    capture_id = await _extracted_and_scored(client, sessions)
+
+    variant = client.get(f"/api/offers/{capture_id}").json()["variant_recommendation"]
+    assert variant["variant"] == "cartografia_nautica"
+    assert variant["confidence"] == "low"
+    assert "simulad" in variant["reason"]
+
+
+async def test_the_detail_crosses_requirements_against_the_evidence_bank(
+    api: tuple[TestClient, FakeQueue],
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    """Los campos que M1 dejó a NULL, ahora rellenos y en otra tabla.
+
+    `offer_requirements.match` sigue en NULL —esa capa es inmutable y el
+    cruce tiene que poder recalcularse— y el cruce vive en la capa
+    `assessment`. Aquí se ve que la respuesta lleva las dos cosas sin
+    confundirlas.
+    """
+    client, _ = api
+    capture_id = await _extracted_and_scored(client, sessions)
+
+    body = client.get(f"/api/offers/{capture_id}").json()
+    assert all(
+        requirement["match"] is None
+        for requirement in body["extraction"]["requirements"]
+    )
+    matches = body["assessment"]["requirement_matches"]
+    assert matches
+    for match in matches:
+        assert match["requirement_text"]
+        if match["match"] == "meets":
+            assert match["evidence_ref"], "un `meets` sin referencia no debería estar"
+
+
+async def test_a_failed_assessment_says_why_and_keeps_the_extraction(
+    api: tuple[TestClient, FakeQueue],
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    """Sin repositorio de datos no se puntúa, y todo lo demás sigue.
+
+    Es el camino que hay hoy en la VM, donde el clon de solo lectura es M3.
+    """
+    client, _ = api
+    ingested = _ingest(client).json()
+    await _extract(sessions, ingested["job_run_id"])
+    queued = client.post(f"/api/offers/{ingested['capture_id']}/assess").json()
+    await tasks.assess_offer(
+        {
+            "sessions": sessions,
+            "llm": StubClient({}),
+            "settings": make_settings(data_repo_path=""),
+            "job_try": 1,
+        },
+        queued["job_run_id"],
+    )
+
+    body = client.get(f"/api/offers/{ingested['capture_id']}").json()
+    assert body["assessment_status"] == "failed"
+    assert "DATA_REPO_PATH" in body["assessment_error"]
+    assert body["assessment"] is None
+    assert body["extraction"] is not None
+
+
+async def test_reextracting_leaves_the_new_reading_unscored(
+    api: tuple[TestClient, FakeQueue],
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    """El caso raro que obligó a tocar `status_of`.
+
+    Tras reextraer, el último trabajo de puntuación es el de la extracción
+    **anterior** y dice `succeeded`, pero la lectura de ahora no está
+    puntuada. Decir «puntuada» ahí sería mentir.
+    """
+    client, _ = api
+    capture_id = await _extracted_and_scored(client, sessions)
+    reextracted = client.post(f"/api/offers/{capture_id}/reextract").json()
+    await _extract(sessions, reextracted["job_run_id"])
+
+    body = client.get(f"/api/offers/{capture_id}").json()
+    assert body["extraction_status"] == "succeeded"
+    assert body["assessment_status"] == "none"
+    assert body["assessment"] is None
+
+
+async def test_rescoring_keeps_the_previous_assessment_visible(
+    api: tuple[TestClient, FakeQueue],
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    """Append-only: la lista de versiones es lo que lo hace visible.
+
+    Es lo que enseña que dos ofertas puntuadas con modelos de scoring
+    distintos no son comparables.
+    """
+    client, _ = api
+    capture_id = await _extracted_and_scored(client, sessions)
+    again = client.post(f"/api/offers/{capture_id}/assess").json()
+    await _score(sessions, again["job_run_id"])
+
+    body = client.get(f"/api/offers/{capture_id}").json()
+    assert len(body["assessment_versions"]) == 2
+    assert body["assessment"]["id"] == body["assessment_versions"][0]["id"]

@@ -16,7 +16,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from futuro_api.config import Settings
 from futuro_api.jobs import repository as jobs_repo
 from futuro_api.jobs import vocabularies as vocab
-from futuro_api.jobs.tasks import extract_offer
 from futuro_api.models import JobRun
 
 logger = logging.getLogger(__name__)
@@ -41,8 +40,12 @@ async def create_queue(settings: Settings) -> ArqRedis | None:
     return await create_pool(redis)
 
 
-async def enqueue_extraction(
-    queue: ArqRedis, session: AsyncSession, capture_id: uuid.UUID
+async def _enqueue(
+    queue: ArqRedis,
+    session: AsyncSession,
+    *,
+    kind: vocab.JobKind,
+    capture_id: uuid.UUID,
 ) -> JobRun:
     """Crea la fila del trabajo y lo encola, en ese orden.
 
@@ -57,15 +60,46 @@ async def enqueue_extraction(
     perdida. Es el fallo que se prefiere: visible y recuperable, en lugar de
     un trabajo que se ejecuta contra una fila que no existe.
     """
-    run = await jobs_repo.create_run(
-        session, kind=vocab.JobKind.OFFER_EXTRACTION, capture_id=capture_id
-    )
+    run = await jobs_repo.create_run(session, kind=kind, capture_id=capture_id)
     await session.commit()
 
-    job = await queue.enqueue_job(extract_offer.__name__, str(run.id))
+    job = await queue.enqueue_job(vocab.TASK_OF[kind], str(run.id))
     if job is not None:
         await jobs_repo.attach_arq_job_id(session, run.id, job.job_id)
         await session.commit()
     else:  # pragma: no cover - arq solo devuelve None con job_id repetido
         logger.warning("el trabajo %s no se encoló: ya había uno igual", run.id)
     return run
+
+
+async def enqueue_extraction(
+    queue: ArqRedis, session: AsyncSession, capture_id: uuid.UUID
+) -> JobRun:
+    """Encola la extracción de una captura."""
+    return await _enqueue(
+        queue,
+        session,
+        kind=vocab.JobKind.OFFER_EXTRACTION,
+        capture_id=capture_id,
+    )
+
+
+async def enqueue_assessment(
+    queue: ArqRedis, session: AsyncSession, capture_id: uuid.UUID
+) -> JobRun:
+    """Encola la puntuación de una captura ya extraída.
+
+    Apunta a la captura y no a la extracción, aunque el assessment cuelgue
+    de la extracción. Así la fila de `job_runs` no necesita una columna
+    nueva y el encargo significa «puntúa esta oferta», que es lo que se pide
+    desde la pantalla. El matiz, que es deliberado: si entra una
+    reextracción entre encolar y ejecutar, se puntúa la nueva. Es lo
+    correcto —puntuar la lectura vigente— y es la razón por la que la tarea
+    resuelve la extracción al ejecutarse y no al encolarse.
+    """
+    return await _enqueue(
+        queue,
+        session,
+        kind=vocab.JobKind.OFFER_ASSESSMENT,
+        capture_id=capture_id,
+    )

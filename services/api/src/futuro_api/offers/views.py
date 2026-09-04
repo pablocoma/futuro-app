@@ -243,17 +243,30 @@ def extraction_view(
     )
 
 
-def status_of(
-    run: JobRun | None, extraction: OfferExtraction | None
-) -> ExtractionStatus:
-    """En qué punto está la extracción de una oferta.
+def status_of(run: JobRun | None, produced: object | None) -> ExtractionStatus:
+    """En qué punto está un trabajo de una oferta.
 
-    Se mira el último trabajo y no si existe extracción, porque las dos
+    Se mira el último trabajo y no si existe el resultado, porque las dos
     cosas conviven: al reextraer hay una extracción vigente y un trabajo en
     curso a la vez, y la pantalla tiene que poder decirlo.
+
+    `produced` es lo que el trabajo produce —la extracción vigente, o el
+    assessment vigente— y por eso está tipado como `object | None`: lo único
+    que se le pregunta es si existe. La alternativa era una segunda función
+    idéntica en `assessment/views.py`, y dos definiciones de «en qué punto
+    está esto» acaban discrepando.
+
+    El caso raro que hay que tratar aparte: un trabajo `succeeded` cuyo
+    resultado ya no está vigente. Pasa en la ventana entre que una
+    reextracción termina y su puntuación se encola: el último trabajo de
+    puntuación es el de la extracción anterior y dice `succeeded`, pero la
+    extracción de ahora no está puntuada. Decir «puntuada» ahí sería
+    mentir, así que se dice «sin puntuar».
     """
     if run is None:
-        return "succeeded" if extraction is not None else "none"
+        return "succeeded" if produced is not None else "none"
+    if run.status is jobs_vocab.JobStatus.SUCCEEDED and produced is None:
+        return "none"
     by_status: dict[jobs_vocab.JobStatus, ExtractionStatus] = {
         jobs_vocab.JobStatus.QUEUED: "queued",
         jobs_vocab.JobStatus.RUNNING: "running",

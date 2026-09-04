@@ -21,7 +21,12 @@ from arq.connections import RedisSettings
 
 from futuro_api import db
 from futuro_api.config import get_settings
-from futuro_api.jobs.tasks import MAX_ATTEMPTS, extract_offer, sweep_stale_runs
+from futuro_api.jobs.tasks import (
+    MAX_ATTEMPTS,
+    assess_offer,
+    extract_offer,
+    sweep_stale_runs,
+)
 from futuro_api.llm.factory import build_client
 
 logger = logging.getLogger(__name__)
@@ -55,8 +60,9 @@ async def startup(ctx: dict[str, Any]) -> None:
     ctx["sessions"] = db.create_session_factory(engine)
     ctx["llm"] = build_client(settings)
     logger.info(
-        "worker arrancado (proveedor de LLM: %s)",
+        "worker arrancado (proveedor de LLM: %s, repositorio de datos: %s)",
         "simulado" if settings.llm_stubbed else settings.llm_provider,
+        settings.data_repo_path or "sin configurar, no se podrá puntuar",
     )
 
 
@@ -65,7 +71,7 @@ async def shutdown(ctx: dict[str, Any]) -> None:
 
 
 class WorkerSettings:
-    functions = [extract_offer]
+    functions = [extract_offer, assess_offer]
     # Cada cinco minutos. Es un barrido de una sola sentencia UPDATE, así
     # que correrlo a menudo no cuesta nada y acorta el tiempo que un
     # trabajo perdido pasa aparentando estar en cola.

@@ -10,6 +10,10 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+from pydantic import BaseModel
+
+from futuro_api.assessment.schemas import ScoringDraft, VariantChoiceDraft
 from futuro_api.offers.schemas import ExtractionDraft
 
 # Palabras clave que el modo estricto no acepta. La tentación de usarlas es
@@ -56,16 +60,29 @@ def _problems(node: Any, path: str) -> list[str]:
     return found
 
 
-def test_the_draft_schema_is_valid_for_strict_structured_outputs() -> None:
-    problems = _problems(ExtractionDraft.model_json_schema(), "raíz")
+# Los tres esquemas de salida que existen. Se prueban los tres con el mismo
+# recorrido: el de M2 es tan capaz de llevar un `minLength` por descuido como
+# el de M1, y el fallo se pagaría igual en la primera llamada real.
+DRAFTS = (ExtractionDraft, ScoringDraft, VariantChoiceDraft)
+
+
+@pytest.mark.parametrize("draft", DRAFTS, ids=[d.__name__ for d in DRAFTS])
+def test_the_draft_schemas_are_valid_for_strict_structured_outputs(
+    draft: type[BaseModel],
+) -> None:
+    problems = _problems(draft.model_json_schema(), "raíz")
     assert problems == []
 
 
-def test_nothing_in_the_draft_has_a_default() -> None:
+@pytest.mark.parametrize("draft", DRAFTS, ids=[d.__name__ for d in DRAFTS])
+def test_nothing_in_a_draft_has_a_default(draft: type[BaseModel]) -> None:
     """Un valor por defecto haría que el campo no fuese obligatorio.
 
     Y un campo que el modelo puede omitir es un campo cuya evidencia nadie
-    ha declarado, que es justo lo que el contrato no permite.
+    ha declarado, que es justo lo que el contrato no permite. En M2 el
+    riesgo concreto sería un `score` con valor por defecto: el modelo
+    podría dejar de contestar una dimensión y la nota aparecería puesta por
+    nosotros.
     """
-    schema = ExtractionDraft.model_json_schema()
+    schema = draft.model_json_schema()
     assert set(schema["required"]) == set(schema["properties"])

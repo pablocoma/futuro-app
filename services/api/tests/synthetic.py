@@ -18,6 +18,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from futuro_api.assessment import schemas as assessment_schemas
+from futuro_api.assessment import vocabularies as assessment_vocab
+from futuro_api.data_repo import vocabularies as data_vocab
 from futuro_api.offers import schemas
 from futuro_api.offers import vocabularies as vocab
 
@@ -196,4 +199,111 @@ def good_draft() -> schemas.ExtractionDraft:
                 source_quote="publicado\nel año pasado",
             ),
         ],
+    )
+
+
+# ---------------------------------------------------------------------------
+# M2: respuestas de puntuación
+# ---------------------------------------------------------------------------
+# Se construyen contra el modelo de scoring **sintético** de
+# `fixtures/data_repo/`, que tiene cuatro dimensiones y tres filtros con
+# nombres inventados. Las citas salen de `ADVERT`, que es el anuncio
+# inventado de arriba, para que la verificación contra el anuncio se ejecute
+# de verdad y no se salte por tener citas escritas a mano.
+
+# Un fragmento que sí está en `ADVERT`, para las citas que tienen que valer.
+QUOTE = "Imprescindible SQL avanzado"
+# Uno que no está en ninguna parte, para las que tienen que caerse.
+INVENTED_QUOTE = "ofrecemos un yate y dos semanas en Bali"
+
+SYNTHETIC_DIMENSIONS = (
+    "ahorro_estimado",
+    "aprendizaje",
+    "ubicacion",
+    "encaje_de_rol",
+)
+SYNTHETIC_GATES = (
+    "permiso_de_trabajo",
+    "suelo_de_ahorro",
+    "condiciones_aceptables",
+)
+# Del banco de bullets sintético: el primero es utilizable y el segundo
+# existe pero está `candidate`, así que no sostiene un `meets`.
+USABLE_BULLET = "sondeo_multihaz"
+UNUSABLE_BULLET = "replanteo_de_obra"
+
+
+def dimension_score(
+    name: str,
+    score: int | None = 3,
+    citation: str | None = QUOTE,
+    reason: str = "motivo inventado",
+) -> assessment_schemas.DimensionScore:
+    return assessment_schemas.DimensionScore(
+        dimension=name, score=score, citation=citation, reason=reason
+    )
+
+
+def gate_verdict(
+    name: str,
+    status: assessment_vocab.GateStatus = assessment_vocab.GateStatus.PASS,
+    citation: str | None = QUOTE,
+    reason: str = "motivo inventado",
+) -> assessment_schemas.GateVerdict:
+    return assessment_schemas.GateVerdict(
+        gate=name, status=status, citation=citation, reason=reason
+    )
+
+
+def requirement_cross(
+    position: int,
+    match: vocab.RequirementMatch = vocab.RequirementMatch.PARTIAL,
+    evidence_ref: str | None = None,
+    reason: str = "motivo inventado",
+) -> assessment_schemas.RequirementCross:
+    return assessment_schemas.RequirementCross(
+        requirement_index=position,
+        match=match,
+        evidence_ref=evidence_ref,
+        reason=reason,
+    )
+
+
+def good_scoring_draft(
+    dimensions: list[assessment_schemas.DimensionScore] | None = None,
+    gates: list[assessment_schemas.GateVerdict] | None = None,
+    requirements: list[assessment_schemas.RequirementCross] | None = None,
+    band: data_vocab.ProbabilityBand = data_vocab.ProbabilityBand.MEDIUM,
+    probability_reason: str = "banda inventada, con su motivo",
+) -> assessment_schemas.ScoringDraft:
+    """Una respuesta de puntuación que pasa la validación entera.
+
+    Es el punto de partida de los tests de `rules.py`: cada uno cambia una
+    sola cosa y comprueba qué hace el código con ella. Así lo que se prueba
+    es la regla y no el andamiaje.
+    """
+    return assessment_schemas.ScoringDraft(
+        dimensions=(
+            dimensions
+            if dimensions is not None
+            else [dimension_score(name) for name in SYNTHETIC_DIMENSIONS]
+        ),
+        gates=(
+            gates
+            if gates is not None
+            else [gate_verdict(name) for name in SYNTHETIC_GATES]
+        ),
+        requirements=requirements if requirements is not None else [],
+        probability_band=band,
+        probability_reason=probability_reason,
+    )
+
+
+def good_variant_draft(
+    variant: str = "cartografia_nautica",
+    confidence: vocab.Confidence = vocab.Confidence.HIGH,
+    reason: str = "motivo inventado de la elección",
+) -> assessment_schemas.VariantChoiceDraft:
+    return assessment_schemas.VariantChoiceDraft(
+        variant=variant, confidence=confidence, reason=reason
     )

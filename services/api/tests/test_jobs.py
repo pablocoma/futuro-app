@@ -14,6 +14,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -21,8 +22,12 @@ import sqlalchemy as sa
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from futuro_api.assessment import calls as assessment_calls
+from futuro_api.assessment import prompt as assessment_prompt
+from futuro_api.assessment import repository as assessment_repo
+from futuro_api.assessment import vocabularies as assessment_vocab
 from futuro_api.jobs import repository as jobs_repo
-from futuro_api.jobs import tasks
+from futuro_api.jobs import tasks, worker
 from futuro_api.jobs import vocabularies as jobs_vocab
 from futuro_api.llm import LlmError, LlmRefusal, LlmResult
 from futuro_api.llm.stub import StubClient
@@ -30,6 +35,7 @@ from futuro_api.models import JobRun, LlmCall, OfferCapture, OfferExtraction
 from futuro_api.offers import extraction, prompt, schemas
 from futuro_api.offers import repository as offers_repo
 from futuro_api.offers import vocabularies as vocab
+from tests.conftest import DATA_REPO, make_settings
 from tests.synthetic import ADVERT, absent, good_draft
 
 
@@ -325,3 +331,305 @@ async def test_the_sweep_leaves_finished_runs_alone(
     assert await tasks.sweep_stale_runs({"sessions": sessions}) == 0
     async with sessions() as session:
         assert (await _run(session, run_id)).status is jobs_vocab.JobStatus.SUCCEEDED
+
+
+# ---------------------------------------------------------------------------
+# El segundo tipo de trabajo: puntuar
+# ---------------------------------------------------------------------------
+# Es el que valida el diseño de M1: hace **dos** llamadas al modelo, que es
+# lo que justificó que `job_runs` y `llm_calls` fueran dos tablas.
+
+
+def test_every_job_kind_maps_to_a_task_that_exists() -> None:
+    """El mapa `TASK_OF` tiene que seguir siendo el nombre real.
+
+    arq registra cada tarea por su `__name__`, así que renombrar una
+    función sin tocar el mapa encolaría un trabajo que nadie sabe ejecutar,
+    y el síntoma sería una fila en `queued` para siempre. El mapa existe
+    porque `queue.py` necesita el nombre y `tasks.py` necesita encolar
+    —la extracción encadena la puntuación—, así que importarse mutuamente
+    daba un ciclo.
+    """
+    registered = {function.__name__ for function in worker.WorkerSettings.functions}
+    for kind in jobs_vocab.JobKind:
+        assert kind in jobs_vocab.TASK_OF, f"«{kind.value}» no tiene tarea asignada"
+        assert jobs_vocab.TASK_OF[kind] in registered, (
+            f"la tarea de «{kind.value}» no está registrada en el worker"
+        )
+
+
+def _assessment_stub() -> StubClient:
+    return StubClient(
+        {
+            extraction.PURPOSE: extraction.canned_draft,
+            assessment_calls.SCORING_PURPOSE: assessment_calls.canned_scoring,
+            assessment_calls.VARIANT_PURPOSE: assessment_calls.canned_variant,
+        }
+    )
+
+
+def _assessment_context(
+    sessions: async_sessionmaker[AsyncSession],
+    *,
+    data_repo_path: str | None = None,
+    client: Any = None,
+) -> dict[str, Any]:
+    return {
+        "sessions": sessions,
+        "llm": client or _assessment_stub(),
+        "settings": make_settings(
+            data_repo_path=(
+                str(DATA_REPO) if data_repo_path is None else data_repo_path
+            )
+        ),
+        "job_try": 1,
+    }
+
+
+async def _extracted(
+    sessions: async_sessionmaker[AsyncSession],
+) -> tuple[uuid.UUID, uuid.UUID]:
+    """Una oferta extraída y un trabajo de puntuación en cola."""
+    capture_id, extract_run = await _prepare(sessions)
+    await tasks.extract_offer(_assessment_context(sessions), str(extract_run))
+    async with sessions() as session:
+        run = await jobs_repo.create_run(
+            session,
+            kind=jobs_vocab.JobKind.OFFER_ASSESSMENT,
+            capture_id=capture_id,
+        )
+        await session.commit()
+        return capture_id, run.id
+
+
+async def test_a_successful_assessment_saves_the_score_and_the_variant(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    capture_id, run_id = await _extracted(sessions)
+
+    await tasks.assess_offer(_assessment_context(sessions), str(run_id))
+
+    async with sessions() as session:
+        run = await _run(session, run_id)
+        assert run.status is jobs_vocab.JobStatus.SUCCEEDED
+        saved = await offers_repo.current_extraction(session, capture_id)
+        assert saved is not None
+        assessment = await assessment_repo.current_assessment(session, saved.id)
+        assert assessment is not None
+        assert assessment.job_run_id == run_id
+        assert assessment.source is assessment_vocab.AssessmentSource.LLM
+        assert assessment.prompt_version == assessment_prompt.SCORING_PROMPT_VERSION
+        # La versión **y** el hash del modelo de scoring: `version: 1` no
+        # cambió las dos veces que el modelo cambió el 2026-08-13.
+        assert assessment.scoring_model_version == "7"
+        assert len(assessment.scoring_model_sha256) == 64
+        variant = await assessment_repo.current_variant_recommendation(
+            session, saved.id
+        )
+        assert variant is not None
+        assert variant.job_run_id == run_id
+        assert len(variant.variants_guide_sha256) == 64
+
+
+async def test_one_assessment_job_makes_two_calls_with_distinct_purposes(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    """Lo que justificó separar `job_runs` de `llm_calls` en M1.
+
+    Dos propósitos y no uno: es lo que permite mirar cuánto cuesta puntuar y
+    cuánto cuesta elegir variante por separado, en vez de un total ciego.
+    """
+    _, run_id = await _extracted(sessions)
+
+    await tasks.assess_offer(_assessment_context(sessions), str(run_id))
+
+    async with sessions() as session:
+        purposes = (
+            (
+                await session.execute(
+                    sa.select(LlmCall.purpose).where(LlmCall.job_run_id == run_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert set(purposes) == {
+        assessment_calls.SCORING_PURPOSE,
+        assessment_calls.VARIANT_PURPOSE,
+    }
+
+
+async def test_a_missing_data_repo_fails_without_retrying(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    """Y falla **antes** de llamar al modelo.
+
+    Descubrirlo después de pagar dos llamadas sería tirar el dinero por una
+    comprobación que cuesta leer seis ficheros. Reintentar tampoco arregla
+    un directorio que no está.
+    """
+    _, run_id = await _extracted(sessions)
+
+    await tasks.assess_offer(
+        _assessment_context(sessions, data_repo_path=""), str(run_id)
+    )
+
+    async with sessions() as session:
+        run = await _run(session, run_id)
+        assert run.status is jobs_vocab.JobStatus.FAILED
+        assert "DATA_REPO_PATH" in (run.error or "")
+        assert (
+            await session.execute(
+                sa.select(sa.func.count())
+                .select_from(LlmCall)
+                .where(LlmCall.job_run_id == run_id)
+            )
+        ).scalar_one() == 0
+
+
+async def test_an_unreadable_data_repo_fails_without_retrying(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    _, run_id = await _extracted(sessions)
+
+    await tasks.assess_offer(
+        _assessment_context(sessions, data_repo_path="/no/existe"), str(run_id)
+    )
+
+    async with sessions() as session:
+        run = await _run(session, run_id)
+        assert run.status is jobs_vocab.JobStatus.FAILED
+        assert "no es un directorio" in (run.error or "")
+
+
+async def test_an_offer_without_an_extraction_cannot_be_scored(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    """Sin extracción vigente no hay nada que puntuar, y no se reintenta."""
+    capture_id, _ = await _prepare(sessions)
+    async with sessions() as session:
+        run = await jobs_repo.create_run(
+            session,
+            kind=jobs_vocab.JobKind.OFFER_ASSESSMENT,
+            capture_id=capture_id,
+        )
+        await session.commit()
+        run_id = run.id
+
+    await tasks.assess_offer(_assessment_context(sessions), str(run_id))
+
+    async with sessions() as session:
+        run = await _run(session, run_id)
+        assert run.status is jobs_vocab.JobStatus.FAILED
+        assert "extracción vigente" in (run.error or "")
+
+
+def _bad_variant(user_prompt: str) -> Any:
+    """Una elección de variante que no existe."""
+    draft = assessment_calls.canned_variant(user_prompt)
+    draft.variant = "variante_que_no_existe"
+    return draft
+
+
+async def test_a_rejected_variant_saves_nothing_at_all(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    """El trabajo es atómico: si la variante no se sostiene, no hay assessment.
+
+    Guardar medio resultado dejaría una oferta puntuada y sin variante que
+    nadie distinguiría de una a la que todavía le falta la variante, y el
+    trabajo aparecería como fallido habiendo escrito algo. Cuesta las dos
+    llamadas, que es el mismo precio que M1 aceptó al rechazar una
+    extracción entera.
+    """
+    capture_id, run_id = await _extracted(sessions)
+    client = StubClient(
+        {
+            assessment_calls.SCORING_PURPOSE: assessment_calls.canned_scoring,
+            assessment_calls.VARIANT_PURPOSE: _bad_variant,
+        }
+    )
+
+    await tasks.assess_offer(_assessment_context(sessions, client=client), str(run_id))
+
+    async with sessions() as session:
+        run = await _run(session, run_id)
+        assert run.status is jobs_vocab.JobStatus.FAILED
+        assert "variante_que_no_existe" in (run.error or "")
+        saved = await offers_repo.current_extraction(session, capture_id)
+        assert saved is not None
+        assert await assessment_repo.current_assessment(session, saved.id) is None
+        # Y el coste de las dos llamadas consta igual: ya están pagadas.
+        assert (
+            await session.execute(
+                sa.select(sa.func.count())
+                .select_from(LlmCall)
+                .where(LlmCall.job_run_id == run_id)
+            )
+        ).scalar_one() == 2
+
+
+# ---------------------------------------------------------------------------
+# El encadenado
+# ---------------------------------------------------------------------------
+
+
+class _RecordingQueue:
+    """Una cola que apunta lo que se le encola, para ver el encadenado."""
+
+    def __init__(self) -> None:
+        self.enqueued: list[str] = []
+
+    async def enqueue_job(self, function: str, *args: object) -> Any:
+        self.enqueued.append(function)
+        return SimpleNamespace(job_id=f"encadenado-{len(self.enqueued)}")
+
+
+async def test_a_finished_extraction_chains_the_assessment(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    """Para que el recorrido siga siendo de punta a punta sin botón intermedio."""
+    capture_id, run_id = await _prepare(sessions)
+    queue = _RecordingQueue()
+    context = _assessment_context(sessions)
+    context["redis"] = queue
+
+    await tasks.extract_offer(context, str(run_id))
+
+    assert queue.enqueued == [jobs_vocab.TASK_OF[jobs_vocab.JobKind.OFFER_ASSESSMENT]]
+    async with sessions() as session:
+        runs = (
+            (
+                await session.execute(
+                    sa.select(JobRun.kind).where(JobRun.capture_id == capture_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert jobs_vocab.JobKind.OFFER_ASSESSMENT in runs
+
+
+class _BrokenQueue:
+    async def enqueue_job(self, function: str, *args: object) -> Any:
+        raise ConnectionError("redis de mentira, caído a propósito")
+
+
+async def test_a_failed_chaining_does_not_lose_the_extraction(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    """Perder una llamada ya pagada por no poder encolar la siguiente, no.
+
+    La oferta se queda sin puntuar, la pantalla lo dice y el botón de
+    puntuar sigue ahí.
+    """
+    capture_id, run_id = await _prepare(sessions)
+    context = _assessment_context(sessions)
+    context["redis"] = _BrokenQueue()
+
+    await tasks.extract_offer(context, str(run_id))
+
+    async with sessions() as session:
+        run = await _run(session, run_id)
+        assert run.status is jobs_vocab.JobStatus.SUCCEEDED
+        assert await offers_repo.current_extraction(session, capture_id) is not None
