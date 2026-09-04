@@ -22,8 +22,23 @@ from futuro_api.models import JobRun
 logger = logging.getLogger(__name__)
 
 
-async def create_queue(settings: Settings) -> ArqRedis:
-    return await create_pool(RedisSettings.from_dsn(settings.redis_url))
+async def create_queue(settings: Settings) -> ArqRedis | None:
+    """Abre el pool de la cola, o `None` si no hay cola configurada.
+
+    Sin `REDIS_URL` no se intenta conectar. Es lo que permite levantar la
+    aplicación sin cola —los tests que no la usan, o una consola de solo
+    lectura— sin pagar los reintentos de conexión de una URL que no existe.
+    Con `ENV=production` la variable es obligatoria.
+    """
+    if not settings.redis_url:
+        return None
+    redis = RedisSettings.from_dsn(settings.redis_url)
+    # Un reintento y no los cinco de arq: el `depends_on` del compose espera
+    # a que Redis esté sano antes de arrancar la API, así que si aquí falla
+    # es que pasa algo de verdad, y alargar el arranque treinta segundos
+    # solo retrasa el momento de enterarse.
+    redis.conn_retries = 1
+    return await create_pool(redis)
 
 
 async def enqueue_extraction(

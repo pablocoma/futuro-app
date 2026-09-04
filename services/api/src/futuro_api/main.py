@@ -18,6 +18,8 @@ from starlette.responses import Response
 
 from futuro_api import auth, db, health
 from futuro_api.config import Settings, get_settings
+from futuro_api.jobs import queue as job_queue
+from futuro_api.offers import router as offers_router
 
 VERSION = "0.1.0"
 
@@ -39,9 +41,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         engine = db.create_engine(settings.database_url)
         app.state.engine = engine
         app.state.sessions = db.create_session_factory(engine)
+        # Si Redis no contesta, la API arranca igual y sin cola: seguir
+        # sirviendo lecturas y `/api/health` es más útil que no levantar. Lo
+        # único que se cae es pedir una extracción nueva, y ahí sí se
+        # devuelve un 503 explícito.
+        try:
+            app.state.queue = await job_queue.create_queue(settings)
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "no hay cola de trabajos: la ingesta responderá 503"
+            )
+            app.state.queue = None
         try:
             yield
         finally:
+            if app.state.queue is not None:
+                await app.state.queue.aclose()
             await engine.dispose()
 
     app = FastAPI(
@@ -86,6 +101,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(health.router)
     app.include_router(auth.router)
+    app.include_router(offers_router.router)
     return app
 
 

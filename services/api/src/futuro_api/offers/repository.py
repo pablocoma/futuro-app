@@ -253,3 +253,32 @@ async def list_captures(
             < sa.tuple_(anchor.c.captured_at, anchor.c.id)
         )
     return (await session.execute(query.limit(limit))).scalars().all()
+
+
+async def current_extractions_for(
+    session: AsyncSession, capture_ids: Sequence[uuid.UUID]
+) -> dict[uuid.UUID, OfferExtraction]:
+    """La extracción vigente de cada captura, en una sola consulta.
+
+    `DISTINCT ON` con el mismo orden que `current_extraction`, para que el
+    listado y el detalle no puedan discrepar sobre cuál es la vigente.
+    """
+    if not capture_ids:
+        return {}
+    rows = (
+        (
+            await session.execute(
+                sa.select(OfferExtraction)
+                .where(OfferExtraction.capture_id.in_(capture_ids))
+                .distinct(OfferExtraction.capture_id)
+                .order_by(
+                    OfferExtraction.capture_id,
+                    OfferExtraction.extracted_at.desc(),
+                    OfferExtraction.id.desc(),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return {row.capture_id: row for row in rows}
