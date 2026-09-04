@@ -38,7 +38,19 @@ cita; el código valida en Python, degrada lo que el contrato manda degradar y
 deja constancia de cada corrección. Con esto entran los seis servicios de la
 arquitectura: `redis` y `worker` incluidos.
 
-Siguiente: M2, scoring y recomendación de variante.
+M2 (scoring y recomendación de variante) está cerrada: una oferta extraída se
+puntúa sola contra el modelo de scoring del repositorio privado y se le
+recomienda una de las cinco variantes de CV que ya existen. Aquí el principio
+es distinto del de M1: **el LLM juzga y el código calcula**. El modelo pone la
+nota de cada dimensión, la cita que la sostiene y el motivo; la media
+ponderada, la renormalización, la cobertura, el cubo de cartera y el nivel de
+esfuerzo los calcula Python, y el esquema de salida del modelo no tiene
+siquiera dónde escribirlos. Una nota sin cita no entra: su dimensión queda
+sin puntuar, y la pantalla lo enseña como un hueco rayado en vez de
+ocultarlo. La puntuación es recalculable sin volver a llamar al modelo, y hay
+un camino real para repuntuar el histórico recorriendo la base de datos.
+
+Siguiente: M3, entrega del PDF y dossier mínimo.
 
 ## Desarrollo local
 
@@ -59,6 +71,24 @@ extraer de verdad, `LLM_PROVIDER=openai` con su clave y su modelo.
 `make check` necesita el `postgres` de `make up` levantado: parte de los
 tests comprueban constraints y triggers, que no existen en ningún otro
 sitio.
+
+Para puntuar, la aplicación lee el modelo de scoring y la guía de variantes
+de CV del repositorio privado `Futuro`, montado de solo lectura en
+`/data/repo`. Por omisión `DATA_REPO_HOST_PATH` apunta a un repositorio de
+datos **sintético** que vive en este repositorio
+(`services/api/tests/fixtures/data_repo/`): imita la forma del privado, no
+comparte ni un dato con él y describe a una persona que no existe. Con eso,
+un clon nuevo puntúa una oferta de punta a punta sin tener el privado
+delante. Apuntarlo al de verdad es una línea en `.env`. Sin repositorio de
+datos la aplicación funciona igual y lo único que falla es puntuar, con el
+motivo a la vista en `/api/health` y en la pantalla.
+
+Para repuntuar el histórico entero tras cambiar el modelo de scoring, sin
+llamar al modelo:
+
+```bash
+docker compose exec worker python -m futuro_api.assessment.recompute
+```
 
 Las decisiones de arquitectura completas —stack, topología de repositorios,
 servicios, ingesta de ofertas, fases de entrega— están documentadas en

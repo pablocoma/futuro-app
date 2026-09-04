@@ -1,6 +1,6 @@
 # Traspaso a la siguiente sesión
 
-Última actualización: 2026-09-04.
+Última actualización: 2026-09-04 (cierre de M2).
 
 Este archivo contiene el estado operativo del proyecto. Las reglas duraderas
 están en `AGENTS.md`; no deben duplicarse aquí.
@@ -124,6 +124,70 @@ harness determinista y gratis. La clave de OpenAI está creada y en el `.env`
 local, con presupuesto mensual y auto-recharge desactivado; la primera
 llamada real la hace Pablo cuando quiera poniendo `LLM_PROVIDER=openai`.
 
+### Fase 1 · M2 — scoring y recomendación de variante, cerrada el 2026-09-04
+
+Funciona de punta a punta sin pedir nada: al terminar la extracción, la
+oferta se puntúa sola y se le recomienda una variante de CV. El porqué de
+cada decisión está en `docs/decisions/fase-1-nucleo.md`, no aquí.
+
+El principio de esta rebanada es **distinto** del de M1 y conviene tenerlo
+presente al tocar el código: en la extracción el LLM elegía y citaba; aquí
+**el LLM juzga y el código calcula**.
+
+- **La frontera con el repositorio privado.** `futuro_api/data_repo/` lee
+  seis ficheros de `Futuro` (`scoring_model.yaml`, `objectives.yaml`,
+  `constraints.yaml`, `cv_variants.yaml`, el banco de bullets y la guía de
+  variantes) desde un directorio, `DATA_REPO_PATH`. Hoy lo pone un bind
+  mount de solo lectura; en M3 lo pondrá el clon de git y **no cambia una
+  línea de arriba**. Falla cerrado: sin él no se puntúa y se dice por qué.
+- **El esquema.** Cinco tablas nuevas en la migración `0002`:
+  `offer_assessments` con sus hijas `offer_assessment_dimensions`,
+  `offer_assessment_gates` y `offer_requirement_matches`, más
+  `offer_variant_recommendations`. Las cinco append-only, con el mismo
+  trigger de inmutabilidad que las dos capas de M1. Doce tablas en total.
+- **El código que calcula.** `assessment/scoring.py` es una función pura:
+  media ponderada, renormalización, cobertura, cubo de cartera y nivel de
+  esfuerzo. El esquema de salida del modelo no tiene dónde escribir nada de
+  eso, así que «el código nunca acepta un `value_score` del modelo» es
+  cierto por construcción y no por validación.
+- **El cruce de requisitos.** Vive en la capa `assessment` y no en
+  `offer_requirements`, que es inmutable: los campos `match`,
+  `evidence_ref` y `cv_action` de M1 se quedan en NULL **para siempre**.
+  `rules.enforce_match_rule` ya se llama con datos de verdad, y
+  `evidence_ref` tiene que **resolver** a un bullet `verified` y divulgable.
+- **La cola.** Un segundo tipo de trabajo, `offer_assessment`, con dos
+  llamadas al modelo. `job_runs` y `llm_calls` aguantaron sin ganar ninguna
+  columna, que es lo que M1 predijo. Lo único que cambió es que las
+  consultas de trabajos exigen ahora el tipo.
+- **Repuntuar.** `python -m futuro_api.assessment.recompute` recorre la base
+  de datos y repuntúa sin llamar al modelo. Idempotente por el `sha256` del
+  YAML.
+- **La pantalla.** La composición ponderada: ancho = peso, alto = nota,
+  hueco rayado para lo no puntuable. Más el número grande, los filtros con
+  su cita, y la variante con su motivo.
+
+Verificado en esta máquina el 2026-09-04: `make check` limpio (22 + 294 +
+14 tests), `make migrate-check` limpio, `make up` con los seis servicios
+sanos y `data_repo: ok`, `make e2e` con los 10 tests en verde incluido el
+recorrido entero, el cargador probado contra los dos repositorios —el
+sintético y el privado real—, y el repuntuado ejecutado en el contenedor.
+
+**Lo único no verificado, y no se puede desde aquí:** una puntuación con el
+modelo de verdad. Todo corre con `LLM_PROVIDER=stub` contra el repositorio
+de datos sintético.
+
+**Dato que hay que llevarse a `Futuro`: M2 multiplica por 2,5 el coste por
+oferta**, de ~$0,035 a ~$0,089 medidos con la tabla de tarifas. El
+presupuesto de `ARCHITECTURE.md` §13 (~1 €/mes) pasa de dar para ~30 ofertas
+al mes a dar para ~12.
+
+**Tres huecos de `config/scoring_model.yaml` que decidir en `Futuro`**, y
+que el código deja como huecos visibles en vez de rellenar:
+`portfolio_assignment` no asigna cubo a `very_low`; no declara orden de
+evaluación y sus reglas se solapan; y el orden declarado de `effort_tier`
+hace que una oferta de valor alto con un filtro pendiente salga `cheap` y
+no `full`. El detalle está en `docs/decisions/fase-1-nucleo.md`.
+
 ## Siguiente objetivo principal: Fase 1 — el núcleo de la aplicación
 
 Según `ARCHITECTURE.md` §14, Fase 1 es exactamente esto y nada más: pegar
@@ -142,10 +206,8 @@ una funcionando de punta a punta.
   infraestructura a mano y va por su propia sesión. **No bloquea M1.**
 - **M1 — Ingesta + extracción, sin scoring ni variante. Cerrada** el
   2026-09-04 (ver arriba).
-- **M2 — Scoring + recomendación de variante.** Capa `assessment` contra
-  `Futuro/config/scoring_model.yaml`; el LLM compara la oferta contra
-  `Futuro/cv/variants/README.md` y devuelve variante + confianza + motivo.
-  La aritmética la calcula el código, nunca el modelo.
+- **M2 — Scoring + recomendación de variante. Cerrada** el 2026-09-04 (ver
+  arriba).
 - **M3 — Entrega del PDF + dossier mínimo.** Lectura de solo lectura del
   repositorio privado para localizar el PDF de la variante; confirmar o
   cambiar variante; descargar; dossier mínimo en Postgres. Sin estados ni
@@ -164,45 +226,42 @@ una funcionando de punta a punta.
 - Al cerrar cada rebanada, actualizar este archivo con el estado comprobado y
   ampliar `docs/decisions/fase-1-*.md` con qué se integró y por qué.
 
-## Siguiente paso: M2 — scoring y recomendación de variante
+## Siguiente paso: M3 — entrega del PDF y dossier mínimo
 
-Según el troceo, M2 es la capa `assessment` del contrato de datos y la
-elección de variante de CV. No espera al deploy, igual que M1.
+Con esto, Fase 1 queda cerrada. No espera al deploy, igual que M1 y M2.
 
 ### Alcance
 
-- **Capa `assessment`**, recalculable, contra
-  `Futuro/config/scoring_model.yaml`. La propiedad que justifica separarla
-  ya está montada: repuntuar el histórico es recorrer la base de datos, no
-  volver a pagar la extracción de cada oferta.
-- **El LLM juzga y el código calcula.** El modelo pone la nota de cada
-  dimensión y la cita que la sostiene; la media ponderada, la
-  renormalización, la cobertura, el cubo de cartera y el nivel de esfuerzo
-  los calcula el código. Una nota sin cita es inválida y su dimensión queda
-  sin puntuar. El código nunca acepta un `value_score` calculado por el
-  modelo.
-- **Recomendación de variante**: el LLM compara la oferta con
-  `Futuro/cv/variants/README.md` y devuelve variante, confianza y motivo.
-  No redacta nada: elige entre cinco documentos que ya existen.
-- **La pantalla de la oferta gana su composición ponderada**: el ancho de
-  cada barra es el peso de la dimensión y el alto es la nota, con un hueco
-  rayado para lo que no se pudo puntuar.
+- **El clon de solo lectura del repositorio privado.** M2 dejó montada la
+  frontera (`futuro_api/data_repo/`, con `DATA_REPO_PATH` apuntando a un
+  directorio) y el clon es lo único que falta detrás: `git clone` con deploy
+  key, volumen en la VM, y una política de refresco. El código que lee no se
+  toca, y esa es la razón por la que la frontera se montó antes.
+  **Aquí sí hay que tocar `docs/deployment.md`** —la deploy key es una pieza
+  a provisionar a mano— así que conviene coordinarlo con la sesión del
+  deploy si sigue abierta.
+- **Localizar y servir el PDF** de la variante recomendada desde el clon, y
+  poder confirmar o cambiar la variante. La confirmación de Pablo es una
+  fila **suya** en otra tabla, no un `UPDATE` sobre
+  `offer_variant_recommendations`: esa fila dice qué eligió el modelo, y eso
+  no cambia porque alguien decida otra cosa.
+- **Dossier mínimo en Postgres.** Sin estados ni recordatorios, que son
+  Fase 3.
 
-### Lo que M2 arrastra consigo
+### Lo que M3 hereda ya montado
 
-- La lectura de `Futuro/config/scoring_model.yaml` y de
-  `Futuro/cv/variants/README.md`, que son los primeros datos del
-  repositorio privado que la aplicación necesita. Decidir si eso se
-  adelanta aquí o se deja para el clon de M3 es la primera pregunta de la
-  rebanada.
-- Con ello, los campos `match`, `evidence_ref` y `cv_action` de
-  `offer_requirements`, que M1 dejó a NULL a propósito. La regla que impide
-  marcar `meets` sin referencia ya está escrita y probada en
-  `rules.enforce_match_rule`; solo hay que empezar a llamarla con datos.
-- Un segundo tipo de trabajo en la cola, que es lo que justificó que
-  `job_runs` y `llm_calls` fueran dos tablas.
+- La frontera con el repositorio privado y el repo de datos sintético para
+  los tests, con `DATA_REPO_HOST_PATH` para apuntar al de verdad.
+- El vocabulario de variantes sale del disco: solo es elegible una variante
+  que tenga carpeta **y** entrada en `config/cv_variants.yaml`. M3 solo
+  tiene que bajar un nivel más, al PDF.
+- `DATA_REPO_PATH` **no** es obligatorio con `ENV=production`, y eso es una
+  decisión de M2 que M3 tiene que revertir: cuando exista el clon, pasa a la
+  lista de obligatorias de `Settings.check_production_requirements`.
 
-### Al cerrar M2
+### Al cerrar M3
 
-Ampliar `docs/decisions/fase-1-nucleo.md` y reescribir este archivo con el
-estado comprobado y M3 como siguiente objetivo.
+Ampliar `docs/decisions/fase-1-nucleo.md`, reescribir este archivo, y con
+ello Fase 1 queda cerrada: la siguiente es la Fase 2 (perfil editable), que
+es la primera que **escribe** en el repositorio privado y necesita la
+mecánica de `pull --rebase`, diff y confirmación de `ARCHITECTURE.md` §5.
