@@ -3,8 +3,20 @@
 # que pueda desincronizarse: solo lo que cambia.
 #
 # Lo que añade: bind mounts del código, recarga en caliente en api, worker y
-# web, los puertos de Postgres y Redis expuestos al Mac, y Caddy en 8080 sin
-# HTTPS.
+# web, los puertos de Postgres y Redis expuestos al Mac, Caddy en 8080 sin
+# HTTPS, y el repositorio de datos privado montado de solo lectura.
+#
+# El repositorio de datos: `DATA_REPO_HOST_PATH` dice qué directorio del Mac
+# se monta en `/data/repo`, y por omisión es el repositorio **sintético** de
+# los tests. Es lo que hace que un clon nuevo levante con `make up` y
+# recorra el camino entero —pegar, extraer, puntuar, ver— sin tener el
+# repositorio privado delante ni gastar nada. Apuntarlo al de verdad es una
+# línea en `.env`.
+#
+# Solo aquí y no en `docker-compose.yml`: en producción ese directorio lo
+# pondrá el clon de solo lectura, que es M3, y montarlo antes dejaría un
+# volumen vacío diciendo «no se puede leer» donde la verdad es «todavía no
+# existe».
 
 services:
   caddy:
@@ -25,14 +37,19 @@ services:
       - --reload
       - --reload-dir
       - /app/src
-    volumes:
+    # `!override` y no añadir: la lista base está vacía hoy, pero cuando M3
+    # monte el clon en producción esta tendría que reemplazarla y no
+    # sumarse, o habría dos montajes peleándose por `/data/repo`.
+    volumes: !override
       # Solo el código: .venv se queda la del contenedor, que es la que
       # coincide con uv.lock para linux/arm64.
       - ./services/api/src:/app/src
       - ./services/api/migrations:/app/migrations
+      - ${DATA_REPO_HOST_PATH:-./services/api/tests/fixtures/data_repo}:/data/repo:ro
     environment:
       ENV: development
       LOG_LEVEL: DEBUG
+      DATA_REPO_PATH: /data/repo
     ports:
       - "8000:8000"
 
@@ -61,11 +78,13 @@ services:
       - futuro_api.jobs.worker.WorkerSettings
       - --watch
       - /app/src
-    volumes:
+    volumes: !override
       - ./services/api/src:/app/src
+      - ${DATA_REPO_HOST_PATH:-./services/api/tests/fixtures/data_repo}:/data/repo:ro
     environment:
       ENV: development
       LOG_LEVEL: DEBUG
+      DATA_REPO_PATH: /data/repo
 
   postgres:
     ports:

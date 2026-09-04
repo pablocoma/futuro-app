@@ -1,0 +1,34 @@
+# Variantes INVENTADAS, para el harness. Ver la cabecera de
+# scoring_model.yaml.
+#
+# `batimetria_profunda` está declarada aquí y **no** tiene carpeta bajo
+# cv/variants/, igual que `quant_exploratory` en el repositorio privado. Es
+# el caso que obliga a que el vocabulario de variantes salga del disco y no
+# de este fichero: una variante sin documento no se puede elegir.
+
+version: 4
+updated_at: 2031-04-02
+
+strategy: >-
+  Un solo maestro y cuatro variantes base por familia. Para cada vacante se
+  parte de la más cercana.
+
+base_variants:
+  cartografia_nautica:
+    target_roles:
+      - cartografo
+  topografia_urbana:
+    target_roles:
+      - topografo
+  teledeteccion:
+    target_roles:
+      - analista_gis
+  sistemas_gis:
+    target_roles:
+      - analista_gis
+      - cartografo
+  batimetria_profunda:
+    target_roles:
+      - cartografo
+    note: >-
+      No se genera hasta que tenga campañas de sondeo que enseñar.

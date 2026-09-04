@@ -16,6 +16,13 @@ export type Health = {
   version: string;
   database: "ok" | "unreachable";
   queue: "ok" | "unreachable";
+  /**
+   * El repositorio privado de donde sale el modelo de scoring. Se informa
+   * aparte y no cuenta para el estado general: sin él lo único que no
+   * funciona es puntuar.
+   */
+  data_repo: "ok" | "unreadable" | "not_configured";
+  data_repo_error: string | null;
 };
 
 export type CurrentUser = {
@@ -92,6 +99,97 @@ export type Extraction = {
   corrections: Correction[];
 };
 
+/**
+ * Una barra de la composición ponderada.
+ *
+ * `weight_share` es el ancho y `score_share` la altura, y los dos vienen
+ * calculados de la API. La pantalla no divide pesos: si lo hiciera, habría
+ * dos sitios donde se calcula lo mismo y el día que discreparan el dibujo
+ * diría una cosa y la puntuación otra.
+ *
+ * `score` nulo es una dimensión que **no se pudo puntuar**, con su motivo
+ * en `unscored_reason`. No es un cero: un cero es una nota.
+ */
+export type Dimension = {
+  dimension: string;
+  weight: number;
+  weight_share: number;
+  score: number | null;
+  score_share: number | null;
+  citation: string | null;
+  reason: string | null;
+  anchor: string | null;
+  unscored_reason: string | null;
+};
+
+/**
+ * Un filtro eliminatorio. `pending` es «no se pudo comprobar», que no es
+ * «incumple»: el modelo de scoring dice que un filtro que no se puede
+ * evaluar nunca se supone superado, y el código no lo supone incumplido.
+ */
+export type Gate = {
+  gate: string;
+  status: "pass" | "stretch" | "pending" | "fail";
+  citation: string | null;
+  reason: string;
+};
+
+export type RequirementMatch = {
+  requirement_position: number;
+  requirement_text: string;
+  match: "meets" | "partial" | "no_evidence";
+  evidence_ref: string | null;
+  reason: string;
+};
+
+export type Assessment = {
+  id: string;
+  assessed_at: string;
+  /** `recomputed` es una puntuación recalculada sin llamar al modelo. */
+  source: "llm" | "recomputed";
+  scoring_model_version: string;
+  scoring_model_sha256: string;
+  prompt_version: string | null;
+  model: string | null;
+  cost_usd: string | null;
+  /** Nulo cuando la cobertura no llega al mínimo: no se emite puntuación. */
+  value_score: string | null;
+  coverage: string;
+  probability_band: "high" | "medium" | "low" | "very_low";
+  probability_reason: string;
+  /** Nulo cuando el modelo de scoring no asigna cubo; el motivo lo explica. */
+  portfolio_bucket:
+    | "realistic"
+    | "realistic_stretch"
+    | "aspirational"
+    | "experimental"
+    | "discard"
+    | null;
+  portfolio_note: string | null;
+  effort_tier: "full" | "standard" | "cheap" | "skip";
+  dimensions: Dimension[];
+  gates: Gate[];
+  requirement_matches: RequirementMatch[];
+  corrections: Correction[];
+};
+
+export type VariantRecommendation = {
+  variant: string;
+  confidence: "high" | "medium" | "low";
+  reason: string;
+  recommended_at: string;
+  model: string;
+  prompt_version: string;
+};
+
+export type AssessmentVersion = {
+  id: string;
+  assessed_at: string;
+  source: "llm" | "recomputed";
+  scoring_model_version: string;
+  value_score: string | null;
+};
+
 export type ExtractionStatus =
   | "none"
   | "queued"
@@ -114,6 +212,11 @@ export type Offer = {
   extraction_error: string | null;
   extraction: Extraction | null;
   versions: { id: string; prompt_version: string; model: string; extracted_at: string }[];
+  assessment_status: ExtractionStatus;
+  assessment_error: string | null;
+  assessment: Assessment | null;
+  variant_recommendation: VariantRecommendation | null;
+  assessment_versions: AssessmentVersion[];
 };
 
 export type OfferSummary = {
@@ -238,4 +341,15 @@ export function ingestOffer(input: {
 
 export function reextractOffer(id: string): Promise<PostResult<IngestResult>> {
   return apiPost<IngestResult>(`/api/offers/${id}/reextract`);
+}
+
+export type AssessResult = {
+  capture_id: string;
+  extraction_id: string;
+  job_run_id: string;
+  assessment_status: ExtractionStatus;
+};
+
+export function assessOffer(id: string): Promise<PostResult<AssessResult>> {
+  return apiPost<AssessResult>(`/api/offers/${id}/assess`);
 }

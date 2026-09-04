@@ -1,0 +1,28 @@
+# Objetivos INVENTADOS, para el harness. Ver la cabecera de
+# scoring_model.yaml: nada de aquí sale del repositorio privado.
+
+version: 3
+updated_at: 2031-04-02
+
+transition:
+  target_year: 2031
+
+primary_objective:
+  statement: >-
+    Salir del archivo municipal a un puesto de levantamiento en el puerto,
+    acumulando campañas embarcadas y ahorro.
+
+# Dos de estos nombres son valores de `offers.vocabularies.RoleFamily`, que
+# es vocabulario de **código** desde M1: la comparación «familia dentro del
+# objetivo» cruza el enum del código con esta lista, así que si aquí no
+# hubiera ninguno de los del enum, el cubo `experimental` se asignaría
+# siempre y la otra rama no se probaría nunca. El tercero es inventado, para
+# comprobar que un nombre que el enum no conoce no molesta.
+role_families:
+  core:
+    - data_engineer
+    - data_scientist
+    - cartografo
+  exploratory:
+    - quantitative_roles
+    - documentalista
