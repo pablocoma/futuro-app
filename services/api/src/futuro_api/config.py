@@ -54,7 +54,9 @@ class Settings(BaseSettings):
     # Origen público de la app, usado para construir el redirect de OAuth.
     public_base_url: str = "http://localhost:8080"
 
-    # Cola de trabajos.
+    # Cola de trabajos. Vacía significa «sin cola»: la aplicación levanta
+    # igual y solo falla lo que necesita encolar. En producción es
+    # obligatoria.
     redis_url: str = "redis://redis:6379/0"
 
     # LLM. El valor por defecto es `stub` porque es el que hace que el
@@ -136,6 +138,7 @@ class Settings(BaseSettings):
                 ("GOOGLE_CLIENT_ID", self.google_client_id),
                 ("GOOGLE_CLIENT_SECRET", self.google_client_secret),
                 ("ALLOWED_EMAILS", self.allowed_emails),
+                ("REDIS_URL", self.redis_url),
             )
             if not value
         ]

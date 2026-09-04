@@ -8,7 +8,9 @@ trigger de inmutabilidad.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 
 import sqlalchemy as sa
 from pydantic import BaseModel
@@ -196,3 +198,39 @@ async def fail_stale_runs(
         )
     ).scalars()
     return list(stale)
+
+
+async def latest_runs_for(
+    session: AsyncSession, capture_ids: Sequence[uuid.UUID]
+) -> dict[uuid.UUID, JobRun]:
+    """El último trabajo de cada captura, en una sola consulta."""
+    if not capture_ids:
+        return {}
+    rows = (
+        (
+            await session.execute(
+                sa.select(JobRun)
+                .where(JobRun.capture_id.in_(capture_ids))
+                .distinct(JobRun.capture_id)
+                .order_by(JobRun.capture_id, JobRun.queued_at.desc(), JobRun.id.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return {row.capture_id: row for row in rows if row.capture_id is not None}
+
+
+async def cost_of_run(session: AsyncSession, run_id: uuid.UUID) -> Decimal | None:
+    """Lo que costaron las llamadas de un trabajo.
+
+    Devuelve `None` y no cero cuando no hay ninguna llamada registrada: cero
+    significa «no costó nada», que es lo que dice una extracción simulada, y
+    no es lo mismo que «no consta».
+    """
+    total = (
+        await session.execute(
+            sa.select(sa.func.sum(LlmCall.cost_usd)).where(LlmCall.job_run_id == run_id)
+        )
+    ).scalar_one_or_none()
+    return Decimal(total) if total is not None else None

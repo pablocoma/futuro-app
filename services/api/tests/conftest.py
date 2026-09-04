@@ -16,7 +16,9 @@ import os
 import subprocess
 import sys
 from collections.abc import AsyncIterator, Iterator
+from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import sqlalchemy as sa
@@ -43,6 +45,11 @@ def make_settings(**overrides: object) -> Settings:
         "allowed_emails": ALLOWED,
         "postgres_host": "127.0.0.1",
         "postgres_port": 1,
+        # Sin cola: la mayoría de los tests no encolan nada, y con una URL
+        # que no responde cada construcción de la aplicación pagaría los
+        # reintentos de conexión de arq. Los que sí la necesitan inyectan
+        # una cola de mentira en `app.state.queue`.
+        "redis_url": "",
     }
     base.update(overrides)
     return Settings(**base)  # type: ignore[arg-type]
@@ -64,6 +71,7 @@ def make_production_settings(**overrides: object) -> Settings:
         "llm_provider": "openai",
         "openai_api_key": "sk-inventada",
         "openai_model": "gpt-5.6-terra",
+        "redis_url": "redis://redis:6379/0",
     }
     base.update(overrides)
     return make_settings(**base)
@@ -71,6 +79,48 @@ def make_production_settings(**overrides: object) -> Settings:
 
 def make_app(**overrides: object) -> FastAPI:
     return create_app(make_settings(**overrides))
+
+
+class FakeQueue:
+    """Una cola que apunta lo que se le encola y no habla con Redis.
+
+    Los tests de los endpoints tienen que comprobar *que* se encola un
+    trabajo y con qué argumentos, no que arq sepa hablar con Redis. Levantar
+    un Redis para eso alargaría el harness sin comprobar nada más.
+    """
+
+    def __init__(self) -> None:
+        self.enqueued: list[tuple[str, tuple[object, ...]]] = []
+        self.reachable = True
+
+    async def ping(self) -> bool:
+        if not self.reachable:
+            raise ConnectionError("redis de mentira, caído a propósito")
+        return True
+
+    async def enqueue_job(
+        self, function: str, *args: object, **kwargs: object
+    ) -> SimpleNamespace:
+        self.enqueued.append((function, args))
+        return SimpleNamespace(job_id=f"fake-{len(self.enqueued)}")
+
+    async def aclose(self) -> None:
+        return None
+
+
+@contextmanager
+def client_with_queue(**overrides: object) -> Iterator[tuple[TestClient, FakeQueue]]:
+    """Cliente con una cola de mentira ya enchufada.
+
+    Se enchufa **dentro** del `with`, después de que arranque la aplicación:
+    el `lifespan` deja `app.state.queue` a `None` cuando no hay `REDIS_URL`,
+    así que ponerla antes no serviría de nada.
+    """
+    app = make_app(**overrides)
+    queue = FakeQueue()
+    with TestClient(app) as test_client:
+        app.state.queue = queue
+        yield test_client, queue
 
 
 @pytest.fixture
@@ -222,3 +272,32 @@ async def sessions(
                 )
             )
         await engine.dispose()
+
+
+@pytest.fixture
+async def api(
+    sessions: async_sessionmaker[AsyncSession],
+) -> AsyncIterator[tuple[TestClient, FakeQueue]]:
+    """La aplicación entera contra la base de datos de tests.
+
+    Depende de `sessions` no por usarla, sino por su limpieza: al terminar,
+    aquella fixture vacía las tablas. Los endpoints commitean de verdad, así
+    que sin eso una oferta capturada en un test aparecería en el listado del
+    siguiente.
+    """
+    settings = _postgres_settings(TEST_DATABASE)
+    app = make_app(
+        # Con el bypass, igual que en desarrollo local: estos tests van de
+        # lo que hacen los endpoints, y que la puerta esté cerrada tiene sus
+        # propios tests.
+        dev_auth_bypass=True,
+        postgres_host=settings.postgres_host,
+        postgres_port=settings.postgres_port,
+        postgres_db=settings.postgres_db,
+        postgres_user=settings.postgres_user,
+        postgres_password=settings.postgres_password,
+    )
+    queue = FakeQueue()
+    with TestClient(app) as client:
+        app.state.queue = queue
+        yield client, queue
