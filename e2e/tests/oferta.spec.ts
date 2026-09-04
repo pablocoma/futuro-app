@@ -53,8 +53,13 @@ test("pegar una oferta, extraerla y ver de dónde sale cada dato", async ({
   // Se espera a que aparezca la sección de procedencia, que solo se pinta
   // cuando hay extracción: es la señal de que el worker terminó, y no
   // depende de cómo esté redactado el estado.
+  //
+  // `exact` desde M2: hay una segunda sección, «Procedencia de la
+  // puntuación», y sin esto el localizador casaría con las dos. Es lo que
+  // se quiere aquí: este test es el de la extracción y tiene que seguir
+  // pasando aunque la puntuación falle.
   await expect(
-    page.getByRole("heading", { name: "Procedencia" }),
+    page.getByRole("heading", { name: "Procedencia", exact: true }),
   ).toBeVisible({ timeout: 30_000 });
 
   // El título sale del anuncio, con su cita literal debajo.
@@ -72,9 +77,12 @@ test("pegar una oferta, extraerla y ver de dónde sale cada dato", async ({
   // Los requisitos vienen con la cita del fragmento del que salen.
   await expect(page.getByText("Imprescindible SQL y hojas de cálculo.").first()).toBeVisible();
 
-  // Y la procedencia: qué prompt, qué modelo y cuánto costó.
+  // Y la procedencia: qué prompt, qué modelo y cuánto costó. El modelo
+  // aparece dos veces desde M2 —el de la extracción y el de la
+  // puntuación—, así que se coge el primero; la versión del prompt sí es
+  // inequívoca y es la que identifica esta capa.
   await expect(page.getByText("offer-extraction/")).toBeVisible();
-  await expect(page.getByText("stub", { exact: true })).toBeVisible();
+  await expect(page.getByText("stub", { exact: true }).first()).toBeVisible();
 });
 
 test("la oferta capturada aparece en el listado", async ({ page }) => {
