@@ -69,6 +69,24 @@ export default async function Page() {
               <span className="text-ink3">—</span>
             )}
           </Row>
+          {/* El repositorio privado del que sale el modelo de scoring. No
+              es un servicio del compose, pero es lo que decide si se puede
+              puntuar, así que cuando falta conviene enterarse aquí y no al
+              ver un trabajo fallido. No cuenta para el estado general: sin
+              él todo lo demás funciona. */}
+          <Row label="repo de datos">
+            {health ? (
+              <Signal ok={health.data_repo === "ok"}>
+                {health.data_repo === "not_configured"
+                  ? "sin configurar"
+                  : health.data_repo === "unreadable"
+                    ? "no se puede leer"
+                    : "ok"}
+              </Signal>
+            ) : (
+              <span className="text-ink3">—</span>
+            )}
+          </Row>
           <Row label="entorno">
             <span className="font-mono text-ink2">{health?.env ?? "—"}</span>
           </Row>

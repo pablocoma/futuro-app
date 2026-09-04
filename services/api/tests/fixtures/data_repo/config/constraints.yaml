@@ -1,0 +1,30 @@
+# Restricciones INVENTADAS, para el harness. Ver la cabecera de
+# scoring_model.yaml.
+
+version: 2
+updated_at: 2031-04-02
+
+current_known_constraints:
+  relocation: accepted
+  eu_work_authorization: true
+
+sector_policy:
+  excluded_industries: []
+  rule: >-
+    No descarta ningún sector por principio. La valoración se hace por
+    empresa concreta.
+
+disqualifying_conditions:
+  - id: factura_por_su_cuenta
+    rule: >-
+      Descarta la oferta si obliga a facturar como autónoma un puesto que en
+      la práctica es de plantilla.
+    evaluable_from_posting: a_menudo_no
+  - id: pago_por_produccion
+    rule: >-
+      Descarta la oferta si parte del sueldo depende de metros de costa
+      levantados o de campañas cerradas.
+
+accepted_conditions:
+  embarques: aceptado
+  turnos_de_marea: aceptado

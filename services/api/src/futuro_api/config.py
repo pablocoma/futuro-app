@@ -8,6 +8,7 @@ tarde en la primera petición que lo necesite.
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field, model_validator
@@ -59,6 +60,19 @@ class Settings(BaseSettings):
     # obligatoria.
     redis_url: str = "redis://redis:6379/0"
 
+    # Repositorio de datos privado, de solo lectura. Es de donde salen el
+    # modelo de scoring y la guía de variantes de CV: sin él no se puntúa,
+    # pero todo lo demás funciona.
+    #
+    # Vacío significa «no hay repositorio de datos». **No es obligatorio con
+    # `ENV=production`**, y es una decisión, no un olvido: hasta M3 no
+    # existe el clon de solo lectura, y negarse a arrancar dejaría la
+    # aplicación entera caída por una función que todavía no puede
+    # funcionar. En su lugar, `/api/health` informa de que no está y el
+    # trabajo de scoring falla con el motivo. Cuando M3 traiga el clon, esta
+    # variable pasa a la lista de obligatorias de producción.
+    data_repo_path: str = ""
+
     # LLM. El valor por defecto es `stub` porque es el que hace que el
     # harness y el e2e funcionen sin clave y sin gastar: el CI no tiene
     # credenciales de OpenAI y no debería tenerlas. Que ese sea el valor por
@@ -85,6 +99,11 @@ class Settings(BaseSettings):
             for email in self.allowed_emails.split(",")
             if email.strip()
         )
+
+    @property
+    def data_repo_root(self) -> Path | None:
+        """La raíz del repositorio de datos, o `None` si no hay ninguno."""
+        return Path(self.data_repo_path) if self.data_repo_path else None
 
     @property
     def llm_stubbed(self) -> bool:

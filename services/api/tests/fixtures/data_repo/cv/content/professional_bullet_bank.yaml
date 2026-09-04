@@ -1,0 +1,63 @@
+# Banco de bullets INVENTADO, para el harness. Ver la cabecera de
+# config/scoring_model.yaml.
+#
+# Tiene a propósito los tres casos que el cruce de requisitos tiene que
+# distinguir:
+#
+# - dos bullets utilizables (`verified` + `eligible_with_internal_policy_check`);
+# - uno `candidate`, que existe pero no sostiene un `meets`;
+# - uno `verified` pero con `cv_usage: blocked`, que tampoco lo sostiene.
+
+version: 5
+updated_at: 2031-04-02
+language: es
+
+policy:
+  default_evidence_status: candidate
+  default_cv_usage: blocked
+  allowed_contribution_verbs:
+    - contributed_to
+    - worked_on
+    - participated_in
+  blocked_ownership_verbs:
+    - led
+    - owned
+    - architected
+
+bullets:
+  - bullet_id: sondeo_multihaz
+    text_es: >-
+      Participó en el procesado de sondeos multihaz de tres campañas de
+      levantamiento costero.
+    evidence_status: verified
+    cv_usage: eligible_with_internal_policy_check
+    role_families:
+      - cartografia_nautica
+      - batimetria_profunda
+
+  - bullet_id: bases_espaciales
+    text_es: >-
+      Contribuyó al montaje de la base de datos espacial del visor de
+      cubiertas del archivo.
+    evidence_status: verified
+    cv_usage: eligible_with_internal_policy_check
+    role_families:
+      - sistemas_gis
+      - teledeteccion
+
+  - bullet_id: replanteo_de_obra
+    text_es: >-
+      Acompañó replanteos de obra civil con estación total.
+    evidence_status: candidate
+    cv_usage: blocked
+    role_families:
+      - topografia_urbana
+
+  - bullet_id: vuelo_fotogrametrico
+    text_es: >-
+      Participó en un vuelo fotogramétrico cuyo informe sigue sin aprobar
+      para divulgación.
+    evidence_status: verified
+    cv_usage: blocked
+    role_families:
+      - teledeteccion

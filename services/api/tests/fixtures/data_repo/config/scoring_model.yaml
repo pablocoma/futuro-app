@@ -1,0 +1,158 @@
+# Modelo de scoring INVENTADO, para el harness de la API.
+#
+# Este fichero imita la forma de `config/scoring_model.yaml` del repositorio
+# privado y no comparte ni un dato con él. La persona que describe no existe,
+# el oficio es otro y las cifras son inventadas.
+#
+# Es distinto a propósito en todo lo que el código no debe dar por supuesto:
+#
+# - cuatro dimensiones y no seis, con otros nombres y otros pesos;
+# - tres filtros y no cuatro, con otros nombres;
+# - `minimum_coverage` en 0,60 y no en 0,50.
+#
+# Si algún día un test pasa por casualidad porque alguien escribió en el
+# código el nombre de una dimensión real, aquí se caerá.
+
+version: 7
+status: active
+updated_at: 2031-04-02
+
+description: >-
+  Modelo de comparación de vacantes de una cartógrafa inventada que quiere
+  dejar el archivo municipal y trabajar levantando cartas náuticas.
+
+baseline_ciudad_vieja:
+  gross_annual_eur: 21000
+  net_monthly_eur: 1400
+  reference_savings_eur: 4000
+  cause: >-
+    Comparte piso con dos primas y no paga transporte. Las dos cosas se
+    acaban en cuanto se mude al puerto.
+  updated_at: 2031-04-02
+
+weights:
+  ahorro_estimado: 40
+  aprendizaje: 30
+  ubicacion: 20
+  encaje_de_rol: 10
+
+scale:
+  range: [0, 5]
+  granularity: 1
+  rationale: >-
+    Cuatro anclas escritas. Una escala más fina daría precisión falsa.
+
+anchors:
+  ahorro_estimado:
+    measured_against: baseline_ciudad_vieja.reference_savings_eur
+    assumption: >-
+      Se estima con habitación alquilada y sin coche, que es como declara
+      que viviría en el puerto.
+    0: Ahorraría menos que quedándose en el archivo municipal.
+    1: Ahorro parecido al de ahora, hasta 500 EUR más al año.
+    3: Entre 3.000 y 5.000 EUR más al año.
+    5: Más de 9.000 EUR al año por encima de lo de ahora.
+
+  aprendizaje:
+    0: Repetir el mismo catálogo de planos que ya sabe describir.
+    1: Aprendizaje incremental sobre instrumentos que ya maneja.
+    3: Instrumental o método nuevo con alguien que se lo enseñe.
+    5: Acceso a campañas de sondeo que no conseguiría de otra forma.
+
+  ubicacion:
+    includes: >-
+      Vivir junto al mar tiene valor por sí mismo para ella. Esta dimensión
+      lo recoge, además de horarios y embarques.
+    0: Destino o condiciones que rechazaría.
+    1: Aceptable pero sin atractivo.
+    3: Puerto que le apetece, con condiciones razonables.
+    5: Destino claramente deseado, con vida a pie de muelle.
+
+  encaje_de_rol:
+    note: >-
+      Encaje con las familias de config/objectives.yaml y con lo que puede
+      defender del banco de bullets. No es la probabilidad de conseguirlo.
+    0: Fuera de las familias objetivo.
+    1: Encaje parcial; buena parte del día a día no le interesa.
+    3: Dentro de una familia core, con solapamiento claro.
+    5: Descripción que podría haber escrito ella misma.
+
+probability_bands:
+  high: >-
+    Cumple los requisitos duros publicados. Nada la descarta de entrada.
+  medium: >-
+    Cumple lo esencial y falla en uno o dos requisitos secundarios.
+  low: >-
+    Falla en un requisito duro relevante, pero el encaje técnico es real.
+  very_low: >-
+    Varios requisitos duros sin cubrir. Se registra por aprendizaje.
+
+portfolio_assignment:
+  realistic: probabilidad high y valor >= 3.0
+  realistic_stretch: probabilidad medium y valor >= 3.0
+  aspirational: probabilidad low y valor >= 3.0
+  experimental: familia fuera de objectives.role_families.core
+  discard: valor < 3.0, con independencia de la probabilidad
+
+gates:
+  permiso_de_trabajo:
+    pass: Puesto en el país, o fuera con patrocinio explícito.
+    fail: Exige una autorización que no tiene y nadie patrocina.
+
+  suelo_de_ahorro:
+    pass: Ahorro anual estimado >= 2.000 EUR con habitación alquilada.
+    note: >-
+      Expresado en ahorro y no en bruto porque el mismo sueldo no da lo
+      mismo en dos puertos distintos.
+
+  condiciones_aceptables:
+    context: >-
+      Lo que descarta una oferta son condiciones concretas, definidas en
+      constraints.disqualifying_conditions.
+    fail: >-
+      Obliga a facturar por su cuenta un puesto de plantilla, o paga parte
+      del sueldo por metros de costa levantados.
+    pass: Contrato de plantilla y sin retribución por producción.
+    pending: >-
+      El vehículo contractual no consta en el anuncio. Es el caso habitual.
+
+missing_data:
+  rule: renormalize
+  method: >-
+    Se puntúan solo las dimensiones con información real. Los pesos de las
+    que no la tienen se reparten entre las que sí, y el resultado se
+    acompaña de su cobertura.
+  coverage: Porcentaje del peso total que sí pudo puntuarse.
+  minimum_coverage: 0.60
+  below_minimum: >-
+    No se emite puntuación. Se registra qué falta para poder evaluarla.
+  never: >-
+    No se estiman sueldos, impuestos, coste de vida ni probabilidades que no
+    consten en una fuente.
+
+output:
+  required_fields:
+    - value_score
+    - coverage
+    - probability_band
+    - portfolio_bucket
+    - gates_status
+    - effort_tier
+    - unscored_dimensions
+
+  effort_tier:
+    evaluation_order: [skip, cheap, full, standard]
+    note: >-
+      Se evalúan en ese orden y gana el primero que encaje.
+    full:
+      when: valor >= 4.0 y ningún filtro en fail
+      do: Preparar la candidatura entera antes de enviarla.
+    standard:
+      when: valor entre 3.0 y 4.0 y ningún filtro en fail
+      do: Enviar la variante base con ajuste mínimo.
+    cheap:
+      when: valor >= 3.0 pero con filtros en pending o probabilidad very_low
+      do: Solo si postularse es barato.
+    skip:
+      when: cualquier filtro en fail, o valor < 3.0, o cobertura insuficiente
+      do: Registrar y no enviar.

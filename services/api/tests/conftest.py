@@ -33,6 +33,13 @@ from futuro_api.main import create_app
 TEST_DATABASE = "futuro_test"
 API_ROOT = Path(__file__).resolve().parent.parent
 
+# El repositorio de datos **sintético**. Ningún test toca el repositorio
+# privado real: este imita su forma y no comparte ni un dato con él, y es
+# distinto a propósito en todo lo que el código no debe dar por supuesto
+# —cuatro dimensiones y no seis, otros nombres, otros pesos, otra cobertura
+# mínima—. Ver la cabecera de `fixtures/data_repo/config/scoring_model.yaml`.
+DATA_REPO = Path(__file__).resolve().parent / "fixtures" / "data_repo"
+
 ALLOWED = "allowed@example.test"
 
 
