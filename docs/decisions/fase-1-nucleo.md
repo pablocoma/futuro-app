@@ -651,3 +651,621 @@ verdad. Todo lo anterior corre con `LLM_PROVIDER=stub`, que es lo que
 permite que el harness y el E2E sean deterministas y gratis. La primera
 llamada real a OpenAI la hace Pablo cuando quiera, con su clave y su
 presupuesto puestos.
+
+## 2026-09-04 — M2, scoring y recomendación de variante (en curso)
+
+El principio de esta rebanada es distinto del de M1 y conviene tenerlo
+delante al leer lo que sigue: en la extracción **el LLM elegía y citaba**;
+aquí **el LLM juzga y el código calcula**. El modelo pone la nota de cada
+dimensión, la cita que la sostiene y el motivo; la media ponderada, la
+renormalización, la cobertura, el cubo de cartera y el nivel de esfuerzo
+salen de `assessment/scoring.py`, que es una función pura y no ve al modelo.
+
+Se documenta a medida que avanza, no al cerrar: el porqué de una decisión se
+olvida antes que el código que la implementa.
+
+### La frontera con el repositorio privado
+
+**Decisión: se monta la frontera ahora y el clon de git se queda en M3.** El
+scoring necesita leer del repositorio privado `Futuro`, que era el primer
+dato de ahí que la aplicación necesita, y el clon de solo lectura estaba
+planificado para M3. Se descartó adelantarlo por un motivo concreto: la
+deploy key es un secreto de GitHub y un montaje en la VM, así que adelantar
+el clon obligaba a tocar `docs/deployment.md` y el workflow de deploy, que
+están en manos de otra sesión en paralelo. Lo que se monta es
+`futuro_api/data_repo/`, cuya única entrada es un directorio
+(`DATA_REPO_PATH`). Hoy ese directorio lo pone un *bind mount* de solo
+lectura; en M3 lo pondrá el clon, y no cambia una línea de arriba.
+
+**Decisión: se descartó copiar el modelo de scoring a este repositorio.** Se
+anota porque era la opción más rápida y es la que hay que no volver a
+proponer: `baseline_madrid` son el bruto, el neto y la tasa de ahorro de
+Pablo. Es exactamente el dato que el primer principio de `AGENTS.md`
+prohíbe.
+
+**Decisión: falla cerrado y ruidoso.** Sin directorio, o con un YAML que no
+cumple la forma, el trabajo de puntuación queda `failed` con el motivo, y la
+pantalla lo enseña. No hay pesos por defecto en ninguna parte, así que no
+existe el camino en el que se puntúa con un modelo de scoring inventado. El
+repositorio de datos **no** es obligatorio con `ENV=production`, y eso sí es
+una decisión: hasta M3 no hay clon, y negarse a arrancar dejaría la
+aplicación entera caída por una función que todavía no puede funcionar.
+
+**Decisión: cada fila guarda el `sha256` del fichero que leyó.**
+`config/scoring_model.yaml` declara `version: 1` y el propio contrato cuenta
+que el modelo cambió dos veces el 2026-08-13, así que fiarse del número
+declarado es fiarse de que alguien se acuerde de subirlo. El hash es gratis y
+no se olvida. Lo mismo con `variants_guide_sha256`.
+
+**Decisión: el cargador no cachea.** Se releen los seis YAML en cada trabajo.
+Al lado de una llamada al modelo el coste es irrelevante, y en local tiene la
+propiedad que se quiere: editas un peso y el siguiente trabajo ya lo usa.
+
+**Corrección de un supuesto del diseño: no todo el vocabulario del
+repositorio de datos puede ser libre.** La idea de partida era que cualquier
+vocabulario que viva en el YAML fuese `text` sin CHECK, validado en Python:
+una migración no debe ir detrás de un fichero que se edita a mano. Eso vale
+para los nombres de dimensión, los de filtro y los identificadores de
+variante, que el código transporta sin decidir nada con ellos. **No vale**
+para las bandas de probabilidad, los cubos de cartera y los niveles de
+esfuerzo: para calcular el cubo hay que preguntar «¿es esta banda `high`?»,
+así que renombrar `high` en el YAML no rompería una constraint, cambiaría en
+silencio el resultado de una comparación y todas las ofertas caerían en otro
+cubo. Esos tres son vocabulario de código con su CHECK, y el cargador
+comprueba al arrancar que el YAML declara exactamente esos nombres —en las
+dos direcciones: uno que falta deja un cubo inalcanzable y uno de más es una
+regla que el código no sabe calcular—. Lo mismo con la escala 0-5, que está
+escrita en un CHECK.
+
+**Decisión: los predicados del cubo y del esfuerzo van escritos a mano, con
+su fecha, y no leídos del YAML.** No es pereza: `portfolio_assignment` y
+`output.effort_tier` no expresan sus reglas en forma legible por máquina.
+`realistic: probabilidad high y valor >= 3.0` es prosa. Lo que sí es legible
+—pesos, anclas, escala, nombres, `minimum_coverage`, `evaluation_order`— se
+lee del YAML y no se repite. Los dos umbrales (3,0 y 4,0) están copiados a
+mano en `assessment/scoring.py` con la fecha de lectura, que es exactamente
+lo que hace `llm/cost.py` con la tabla de tarifas del proveedor y por la
+misma razón: la fuente es prosa para humanos. Las tres defensas también son
+las mismas: el cargador exige que los nombres coincidan, cada fila guarda el
+hash del YAML, y repuntuar no cuesta una llamada. Cuando esos dos bloques
+pasen a forma legible por máquina en el repositorio privado, estos umbrales
+se borran.
+
+**Decisión: el repositorio de datos sintético vive en
+`services/api/tests/fixtures/data_repo/` y es distinto del real en todo lo
+que el código no debe dar por supuesto.** Cuatro dimensiones y no seis, con
+otros nombres y otros pesos; tres filtros y no cuatro; `minimum_coverage` en
+0,60 y no en 0,50; cuatro variantes y no cinco, con identificadores
+inventados. Si algún día un test pasa por casualidad porque alguien escribió
+en el código el nombre de una dimensión real, ahí se cae. Dos excepciones
+deliberadas: los nombres de banda, cubo y nivel son los mismos, porque son
+vocabulario de código; y `objectives.role_families.core` incluye dos valores
+del `RoleFamily` de M1, porque si no ninguna oferta caería nunca dentro del
+objetivo y la rama que no asigna `experimental` no se probaría nunca.
+
+**Decisión: `.env.example` apunta al repositorio sintético.** Es lo que hace
+que un clon nuevo levante con `make up` y recorra el camino entero —pegar,
+extraer, puntuar, ver— sin tener el repositorio privado delante ni gastar
+nada. El `.env` de Pablo apunta al real.
+
+### Dónde va el cruce de requisitos, y por qué no donde el contrato lo dibuja
+
+**Hallazgo que decidió el diseño: `offer_requirements` lleva el trigger de
+inmutabilidad desde M1.** Está en `_IMMUTABLE_TABLES` de la migración 0001,
+así que los campos `match`, `evidence_ref` y `cv_action` que M1 dejó en NULL
+**no se pueden rellenar después**: un `UPDATE` no pasa. Eso descarta la
+lectura obvia del encargo —«que M2 empiece a rellenar esos campos»— y deja
+tres caminos.
+
+**Decisión: el cruce vive en la capa `assessment`, en
+`offer_requirement_matches`.** Las columnas de `offer_requirements` se quedan
+en NULL para siempre, y NULL sigue significando «sin evaluar». Las dos
+alternativas se descartaron con motivo:
+
+- **Rellenarlas dentro del trabajo de extracción**, en el INSERT. Obligaría a
+  que la extracción leyera el banco de evidencias, metiendo un juicio sobre
+  el perfil en la capa que dice «esto leí en el anuncio». Y lo peor: cuando
+  el banco de evidencias cambie —que es literalmente la Fase 2, perfil
+  editable— volver a cruzar exigiría reextraer y pagar el LLM otra vez, que
+  es justo lo que separar las capas evita.
+- **Quitar y reponer el trigger para un backfill.** M1 dejó eso previsto para
+  una migración, no para el runtime de cada oferta.
+
+Es una desviación deliberada del contrato, que dibuja `match` dentro de
+`requirements[]` en la sección de `extraction`. Se toma porque la propia
+regla del contrato —«`assessment` se recalcula sin volver a llamar al
+LLM»— exige que un cruce contra un banco que cambia no viva en una capa
+inmutable. Queda pendiente reflejarlo en `OFFER_DATA_CONTRACT.md` del
+repositorio privado, donde desde aquí no se escribe.
+
+**Decisión: `evidence_ref` tiene que resolver, no solo estar.**
+`rules.enforce_match_rule`, escrita y probada en M1 sin datos, se llama ahora
+con datos de verdad, y con la comprobación fuerte que en M1 no se podía
+hacer: la referencia tiene que apuntar a un `bullet_id` que exista en
+`cv/content/professional_bullet_bank.yaml`, esté `verified` y sea divulgable
+(`cv_usage: eligible_with_internal_policy_check`). Los dos estados, no uno:
+el primero dice que el contenido está comprobado y el segundo que se puede
+divulgar. Una referencia que no resuelve es el parecido de palabras que el
+contrato prohíbe, con la forma de un identificador.
+
+**Decisión: solo contra el banco de bullets, no contra
+`profile/evidence_bank.md`.** El primero tiene identificadores y estados, así
+que una referencia se puede comprobar; el segundo es prosa y casi todo está
+en `candidate`. Una referencia a un párrafo no se puede verificar, y una
+referencia que no se puede verificar es la que el contrato prohíbe.
+
+**Decisión: `cv_action` se queda fuera de M2.** La columna existe y se queda
+nula. `ARCHITECTURE.md` §7 descarta explícitamente la adaptación fina por
+vacante —el LLM elige entre cinco PDF, no reordena bullets— así que hoy nadie
+consumiría `include`/`prioritise`/`omit`, y un campo que nadie lee se llena
+mal sin que nadie se entere.
+
+### El esquema de la capa `assessment`
+
+**Decisión: el assessment cuelga de la extracción, no de la captura.** Es la
+conclusión sobre una lectura concreta del anuncio; si se reextrae con otro
+prompt, seguir enseñando la conclusión anterior como vigente sería mentir. El
+vigente es el último por `(assessed_at, id)` de la extracción vigente: el
+mismo patrón que M1, y sin marca mutable de «vigente» por el mismo motivo.
+Sin `unique(extraction_id, scoring_model_version)`, también por lo mismo:
+repuntuar tras un fallo con la misma versión tiene que poder crear fila.
+
+**Decisión: append-only, con el trigger de inmutabilidad de las otras dos
+capas.** «Recalculable» significa insertar una fila nueva, no editar la
+vieja. Sin el trigger, alguien arregla una nota en sitio y la promesa que
+justifica guardar `scoring_model_version` —que dos ofertas puntuadas con
+modelos distintos se noten— muere en silencio.
+
+**Decisión: las dimensiones y los filtros son tablas hijas, no columnas.**
+Seis columnas tipadas serían duplicar en el esquema la lista de dimensiones,
+que vive en el YAML. No es la EAV que M1 descartó: la forma es fija y
+uniforme, no un vocabulario de campos que la base de datos desconoce. El
+precio de un join se cobra con lo que un `jsonb` no daría: los CHECK que
+imponen la regla central del contrato y poder preguntar en SQL cuánto puntúa
+de media una dimensión en toda la cartera.
+
+**Decisión: la fila de dimensión guarda el `weight` y el `anchor` que se le
+aplicaron.** Es lo que hace reproducible la composición ponderada de la
+pantalla: la barra de una oferta puntuada en marzo se dibuja con el peso que
+produjo su nota, no con el de hoy. Y significa que la API no necesita leer el
+repositorio de datos para pintar, así que el repositorio de datos es una
+dependencia **solo del worker**.
+
+**Decisión: «sin puntuar» es la propia fila con la nota vacía.** No hay una
+lista `unscored_dimensions` aparte que pueda contradecir a las notas. Dos
+CHECK lo sostienen: `score IS NULL OR citation IS NOT NULL` —la regla central
+del contrato, en la base de datos— y `(score IS NULL) = (unscored_reason IS
+NOT NULL)`.
+
+**Decisión: la recomendación de variante es su propia tabla.** La propiedad
+que define esta capa es que se recalcula sin volver a llamar al modelo, y la
+elección de variante **no** se puede recalcular sin llamarlo. Como tres
+columnas del assessment, cada repuntuación tendría que o pagar otra llamada o
+arrastrar la elección anterior, y la propiedad dejaría de ser cierta.
+Separada, repuntuar el histórico no toca ninguna variante elegida, y en M3 la
+confirmación manual de Pablo no la borra un recálculo.
+
+**Decisión: `source` (`llm` / `recomputed`) con tres CHECK que la atan.** Un
+recálculo no tiene `job_run_id` y sí `derived_from_id`; un assessment del
+modelo, al contrario, y además declara `prompt_version` y `model`. Es la
+invariante que hace comprobable la repuntuación: si algún día alguien
+«recalcula» llamando al LLM, el esquema no le deja guardarlo.
+
+**Decisión: un cubo que falta lleva siempre su motivo** (`portfolio_bucket IS
+NOT NULL OR portfolio_note IS NOT NULL`). Es lo que hace que un hueco en
+pantalla se pueda leer en vez de parecer un fallo de la aplicación.
+
+### La migración 0002
+
+**Decisión: la única cosa que cambia de 0001 es el vocabulario de
+`job_runs.kind`.** Todo lo demás son tablas nuevas, así que es compatible
+hacia atrás y la versión anterior de la aplicación sigue funcionando contra
+este esquema, que es lo que exige el rollback del deploy. Ese CHECK va
+escrito a mano porque el filtro `include_name` lo excluye de la comparación
+de Alembic; lo vigila el test que compara los valores del CHECK real contra
+el `StrEnum`.
+
+**Hallazgo: el `downgrade` no es simétrico y no puede serlo.** Estrechar el
+vocabulario de `job_runs.kind` obliga a borrar antes las filas de los
+trabajos de puntuación, porque si no violarían el CHECK que se repone. Es
+pérdida de datos en un `downgrade`, y es aceptable porque lo que esas filas
+registran apunta a tablas que ese mismo `downgrade` está borrando. Queda
+comentado en la migración: es el tipo de cosa que alguien «arregla»
+quitándole el DELETE y descubre que la migración ya no baja.
+
+### El reparto entre el modelo y el código
+
+**Decisión: lo que el código calcula no está en el esquema de salida del
+modelo.** El encargo decía «el código NUNCA acepta un `value_score` que
+venga calculado por el modelo, aunque lo mande». La forma fuerte de esa
+regla no es tacharlo al validar: es que no exista el campo.
+`assessment/schemas.py` no tiene `value_score`, ni `coverage`, ni
+`portfolio_bucket`, ni `effort_tier`, ni `unscored_dimensions`, ni el peso
+de la dimensión. Con `extra="forbid"`, una respuesta que los mande **no
+parsea**, así que no hay ningún camino por el que lleguen. Es el mismo
+patrón que hizo `active_verified` inalcanzable en M1: no poder decirlo es
+más fuerte que decirlo y que el código lo tache. Hay un test que manda un
+`value_score` a propósito y comprueba que la respuesta se cae.
+
+**Decisión: el esquema pide una lista de dimensiones y no un campo por
+dimensión.** Generar el modelo Pydantic desde el YAML cargado daría la forma
+más fuerte todavía —el modelo no podría dejarse una dimensión sin
+contestar—, y se descartó: el esquema de salida de una llamada dejaría de
+ser legible en el repositorio, y no se podría revisar sin ejecutar nada. Lo
+que se pierde se recupera en `rules.py`, que exige exactamente las
+dimensiones cargadas y deja sin puntuar las que el modelo no devuelva.
+
+**Decisión: una nota sin cita utilizable deja la dimensión sin puntuar, y no
+se corrige la nota.** Cuatro formas de lo mismo, y las cuatro con test: sin
+cita, con la cita vacía, con una cita más corta que tres caracteres, y con
+una cita que no aparece en el anuncio. Una nota sin cita comprobable no es
+una nota más baja: es una nota que no existe.
+
+**Decisión: una nota fuera de escala se descarta y no se recorta.** Recortar
+un 9 a un 5 sería inventarse una nota. El modelo dijo algo que no significa
+nada en esta escala, y lo honesto es que la dimensión quede sin puntuar.
+
+**Decisión: la verificación de citas es literalmente la misma función que la
+de la extracción.** `assessment/rules.py` importa `normalise` y
+`MIN_QUOTE_CHARS` de `offers/rules.py`. No es reutilización por ahorrar
+código: «una cita se comprueba contra el anuncio» tiene que significar
+exactamente lo mismo en las dos capas, y con dos implementaciones acabaría
+no significándolo.
+
+**Decisión: un filtro que decide sin cita comprobable pasa a `pending`,
+nunca a `fail`.** Es la regla del YAML —«un filtro que no puede evaluarse
+queda pending, nunca se supone superado»— y su simétrica, que no está
+escrita pero se deduce: tampoco se supone incumplido. Y un filtro `pending`
+no guarda cita: si algo del anuncio lo resolviera, no estaría pendiente.
+
+**Decisión: tres casos de rechazo, y el resto son degradaciones.** Se
+rechaza la respuesta entera cuando no hay degradación honesta: una banda de
+probabilidad sin motivo (la columna es obligatoria, y al contrario que una
+nota no se puede dejar «sin puntuar»), un juego de dimensiones en el que
+ninguna es del modelo de scoring (es una respuesta a otra pregunta), y la
+misma dimensión puntuada dos veces con notas distintas (elegir una sería
+adivinar cuál quiso decir). Una lista de dimensiones **vacía**, en cambio,
+sí se acepta: son cuatro dimensiones sin puntuar, que es una respuesta
+pobre pero es una respuesta.
+
+**Decisión: una variante que no existe rechaza la recomendación entera.** No
+hay degradación honesta: elegir otra sería inventar. El test lo prueba con
+`batimetria_profunda`, que está declarada en `cv_variants.yaml` y no tiene
+carpeta, porque es el caso realista: el modelo la ve mencionada en la guía y
+la elige.
+
+**Decisión: `baseline_madrid` va en el prompt.** Es la primera vez que un
+dato económico de Pablo sale hacia el proveedor: bruto anual, neto mensual y
+ahorro de referencia. La alternativa —no mandarlo— deja la dimensión
+`expected_net_savings`, que pesa 20 sobre 100, sin puntuar siempre, porque
+las anclas están escritas en euros de ahorro contra esa referencia y sin
+ella no hay nada contra lo que comparar. Se manda, y queda anotado aquí
+porque es reversible: quitar un bloque del prompt es una línea.
+
+**Consecuencia relacionada, y conviene saberla de antemano:** el prompt le
+repite al modelo la prohibición de `missing_data.never` —no estimar sueldos,
+impuestos ni coste de vida— y le dice explícitamente que si para comparar
+tendría que estimarlos, deje la dimensión sin puntuar. Con eso, en la
+mayoría de anuncios europeos sin salario publicado `expected_net_savings` y
+`compensation_upside` quedarán sin puntuar y la cobertura rondará 0,65. Está
+por encima del mínimo de 0,50, así que sí se emite puntuación, pero **ese
+será el caso normal y no la excepción**.
+
+### El prompt y el cliente simulado
+
+**Decisión: dos prompts con su huella registrada, como en M1.** Con una
+diferencia que hay que tener presente: la huella **no cubre** el contenido
+del repositorio de datos. Las anclas, los filtros y la guía de variantes se
+interpolan en el mensaje de usuario y cambian sin pasar por el código. Eso
+no es un agujero en la disciplina: es la razón por la que cada fila guarda
+`scoring_model_sha256` y `variants_guide_sha256`. La versión del prompt dice
+qué se le pidió al modelo; el hash dice con qué material.
+
+**Decisión: lo estable va delante del anuncio en el mensaje de usuario.** Por
+la caché de prompt del proveedor, que cubre el prefijo. En una tarea que
+manda el modelo de scoring entero en cada llamada eso es la diferencia entre
+pagar el contexto una vez y pagarlo por oferta, y hay un test que fija el
+orden de los bloques.
+
+**Decisión: al modelo se le manda también la evidencia que *no* vale, con su
+estado.** Mandar solo las utilizables parece más limpio y es peor: el modelo
+no tendría forma de decir «hay algo parecido y no me sirve», y devolvería
+`no_evidence` donde la respuesta honesta es `partial`.
+
+**Decisión: el cliente simulado contesta leyendo del propio prompt qué se le
+ha preguntado.** Las dimensiones, los filtros, las evidencias y los
+requisitos los saca del mensaje que ha recibido, no del repositorio de
+datos. La alternativa era que cargase el repositorio por su cuenta, y se
+descartó por un motivo concreto: el cliente se construye una vez al arrancar
+el worker y el cargador relee los YAML en cada trabajo, así que en cuanto
+alguien editase un peso en local el stub estaría contestando sobre un modelo
+de scoring distinto del que valida `rules.py`, y el resultado serían
+dimensiones «desconocidas» en una pantalla sin ninguna pista de por qué. El
+precio es que el formato del prompt pasa a ser una interfaz, y lo vigila un
+test que compara lo que los parsers leen contra lo que el repositorio de
+datos declara.
+
+**Hallazgo: el primer parser del prompt se ataba a un nivel de encabezado y
+devolvía listas vacías sin quejarse.** El prompt usa `#` para las secciones
+grandes y `##` y `###` dentro; el parser solo miraba `##`, así que las
+posiciones de requisito salían vacías y el stub no cruzaba nada. Lo destapó
+una prueba de humo del camino entero antes de escribir un solo test, no
+leyendo el código. Ahora el parser recorre el índice del documento por
+niveles.
+
+**Decisión: la respuesta simulada puntúa la mitad de las dimensiones.** Con
+los dos modelos de scoring que existen —el real de seis y el sintético de
+cuatro— eso deja la cobertura por encima del mínimo, así que en local se ve
+el número grande; y deja dimensiones sin puntuar, así que también se ve el
+hueco rayado. Los dos caminos de la pantalla se recorren en cada trabajo
+simulado sin tener que provocarlos. Igual con los filtros: el primero se
+decide con una cita del anuncio y el resto quedan pendientes.
+
+**Decisión: la nota simulada es un 3 y no un 5.** Un stub que puntuara alto
+haría que toda oferta pegada en local pareciera excelente.
+
+### La cola
+
+**Decisión: un solo tipo de trabajo nuevo, con dos llamadas al modelo.**
+`offer_assessment` puntúa y elige variante. Es exactamente el caso que
+`docs/decisions` de M1 anticipó al separar `job_runs` de `llm_calls`, y el
+diseño aguantó: `job_runs` no ha ganado ninguna columna. Los dos propósitos
+—`offer_scoring` y `cv_variant_choice`— son lo que permite mirar cuánto
+cuesta cada mitad en vez de un total ciego.
+
+**Decisión: el trabajo es atómico.** Si la elección de variante no se
+sostiene, no se guarda tampoco el assessment. Guardar medio resultado
+dejaría una oferta puntuada y sin variante que nadie distinguiría de una a
+la que todavía le falta la variante, y el trabajo aparecería como fallido
+habiendo escrito algo. Cuesta las dos llamadas, que es el mismo precio que
+M1 aceptó al rechazar una extracción entera; y las dos quedan registradas
+con su coste antes de validar, por lo mismo que en M1.
+
+**Decisión: el repositorio de datos se carga antes de llamar al modelo.**
+Descubrir que no está después de pagar dos llamadas sería tirar el dinero
+por una comprobación que cuesta leer seis ficheros.
+
+**Decisión: la extracción encadena la puntuación al terminar bien.** Es lo
+que hace que el recorrido siga siendo de punta a punta —pegar, extraer,
+puntuar, ver— sin un botón intermedio. Si el encolado falla, la extracción
+**no** se cae: se queda sin puntuar, la pantalla lo dice y el botón de
+puntuar sigue ahí. Perder una llamada ya pagada por no haber podido encolar
+la siguiente sería el error caro.
+
+**Decisión: el trabajo apunta a la captura y no a la extracción**, aunque el
+assessment cuelgue de la extracción. Así `job_runs` no necesita una columna
+nueva y el encargo significa «puntúa esta oferta», que es lo que se pide
+desde la pantalla. El matiz es deliberado: si entra una reextracción entre
+encolar y ejecutar, se puntúa la nueva, que es lo correcto.
+
+**Lo único que M2 le ha tenido que cambiar a la mitad operativa de M1:
+`latest_run_for_capture` y `latest_runs_for` ahora exigen el tipo de
+trabajo.** Con un solo tipo, «el último trabajo de esta oferta» era una
+pregunta sin ambigüedad; con dos, sin filtrar, un trabajo de scoring en
+curso haría que la pantalla dijera que la **extracción** está en curso. El
+parámetro es obligatorio y no tiene valor por defecto a propósito: es lo que
+hace que el tercer tipo de trabajo no reintroduzca el fallo en silencio.
+
+**Hallazgo relacionado: `status_of` mentía en una ventana concreta.** Tras
+reextraer, el último trabajo de puntuación es el de la extracción anterior y
+dice `succeeded`, pero la lectura de ahora no está puntuada. Ahora un
+trabajo `succeeded` cuyo resultado no está vigente devuelve `none`. Tiene su
+test.
+
+**Decisión: la envoltura de estados de la tarea se extrajo a `_run_job`.** Lo
+que centraliza no es código bonito: es marcar `running`, contar los
+intentos y distinguir un fallo permanente de uno transitorio. Un tercer tipo
+de trabajo escrito desde cero se olvidaría de alguna de las tres, y el
+síntoma sería una fila en `running` para siempre.
+
+**Hallazgo: `queue.py` y `tasks.py` se necesitaban mutuamente.** `queue.py`
+importaba la función de la tarea para encolarla por su nombre, y ahora la
+tarea necesita encolar. El ciclo se rompe con un mapa «tipo de trabajo →
+nombre de tarea» en `jobs/vocabularies.py`, que no importa nada, y un test
+ata esas cadenas a los nombres reales de las funciones y a lo que el worker
+registra: arq encola por `__name__`, así que renombrar una función sin tocar
+el mapa dejaría un trabajo que nadie sabe ejecutar.
+
+### Repuntuar el histórico
+
+**Decisión: `assessment/recompute.py`, ejecutable dentro del contenedor, sin
+endpoint ni pantalla.** Es el camino real que el encargo pedía, y su test
+comprueba la propiedad entera: dos ofertas puntuadas, se cambian los pesos,
+se repuntúa recorriendo la base de datos, y las notas cambian **sin que
+aparezca ni una llamada al modelo nueva**. Si algún día alguien «optimiza»
+el recálculo llamando al LLM, ese test se cae.
+
+**Decisión: no es un trabajo de la cola.** Un tercer tipo de `job_runs`
+exigiría justificar qué significa reintentarlo y qué pasa si se queda a
+medias, cuando lo que hace es idempotente: una fila ya repuntuada con el
+modelo de hoy se salta, y eso se decide por el `sha256` del YAML y no por su
+`version`.
+
+**Decisión: una transacción por página y no una para todo.** Un barrido de
+mil ofertas en una sola transacción bloquearía filas durante minutos, y si
+fallara a mitad no habría avanzado nada.
+
+**Decisión: repuntuar también revisa las referencias a evidencias.** Es lo
+único que se recomprueba y no es aritmética: un `meets` apoyado en un bullet
+que desde entonces ha dejado de estar `verified` o de ser divulgable ya no se
+sostiene, y eso se puede saber sin preguntarle a nadie. Se degrada a
+`partial` y queda registrado. Es la consecuencia útil de que el cruce viva en
+esta capa: si viviera en la extracción, volver a cruzar exigiría reextraer.
+
+**Decisión: una dimensión nueva en el modelo de scoring queda sin puntuar.**
+No se le puede inventar nota. La consecuencia hay que aceptarla y está
+probada: la cobertura baja, y si cae por debajo del mínimo la oferta se queda
+sin puntuación hasta que alguien la vuelva a puntuar de verdad. Es lo
+honesto: nadie ha mirado esa dimensión.
+
+**Decisión: las correcciones de la fila anterior no se arrastran.** Eran la
+cuenta de cuántas veces el modelo se saltó las reglas al responder, y la fila
+recalculada no le ha preguntado nada. Arrastrarlas contaría dos veces la
+misma infracción en cada repuntuación, y esa cuenta es la que decide si hay
+que cambiar el prompt.
+
+### La pantalla
+
+**Decisión: el frontend no hace aritmética.** La API manda el ancho
+(`weight_share`) y el alto (`score_share`) ya calculados. Si la pantalla
+dividiera pesos para sacar anchos habría dos sitios donde se calcula lo
+mismo, y el día que discreparan el dibujo diría una cosa y la puntuación
+otra. Y como los pesos salen de la fila y no del YAML de hoy, la composición
+de una oferta puntuada hace meses sigue sumando el 100% con **sus** pesos.
+
+**Decisión: `value_score` y `coverage` viajan como cadena; los anchos y los
+altos, como número.** La diferencia es a qué sirven: los primeros son la
+puntuación, que se enseña tal cual y no se recalcula, así que va el texto
+exacto de la base de datos —la misma regla que M1 aplicó a los importes—; los
+segundos son geometría para CSS.
+
+**Decisión: el hueco de lo no puntuable ocupa el alto completo de su
+columna.** Lo que se enseña no es una nota baja: es que ahí falta
+información y cuánto peso se lleva. Una barra a cero diría otra cosa, porque
+cero **es** una nota.
+
+**Hallazgo de la captura de pantalla, no del código: dos dimensiones sin
+puntuar contiguas se leían como un solo bloque rayado.** Con un píxel de
+separación sobre un fondo casi del mismo tono, el 20% y el 10% parecían un
+30%. Ahora cada hueco lleva su marco discontinuo y la separación es de dos
+píxeles sobre el fondo de la página.
+
+**Decisión: el gráfico es una sola imagen con su descripción.** Leer «40%,
+3, 30%, 3, 20%, sin puntuar» celda a celda no dice nada; la descripción
+nombra cada dimensión con su peso y su nota. El detalle campo a campo está
+debajo en texto, que es donde se puede leer de verdad, con la cita que
+sostiene cada nota y el ancla del modelo de scoring que la explica.
+
+**Decisión: los nombres de dimensión y de filtro se pintan humanizando el
+identificador, sin traducir.** `expected_net_savings` sale como «Expected net
+savings». Tener aquí un diccionario de traducciones sería duplicar en un
+repositorio público el vocabulario del privado, que es justo lo que no se
+hace. Es feo y no oculta nada, el mismo criterio que M1 aplicó a un campo
+sin etiqueta. Los estados de filtro, los cubos y los niveles de esfuerzo sí
+se traducen, porque son vocabulario de código.
+
+**Decisión: `pending` se pinta en el color de alerta y no en el de fallo, y
+con su propio símbolo (`○` frente a `▲`).** Es la confusión que el modelo de
+scoring prohíbe, y un test del E2E comprueba que en una oferta con filtros
+pendientes no aparece «no cumple» en ninguna parte.
+
+**Decisión: el refresco automático cubre los dos trabajos.** Si solo mirara
+la extracción, la página se quedaría quieta justo cuando aún falta la mitad,
+porque la puntuación se encadena después.
+
+**Decisión: el estado del repositorio de datos entra en `/api/health` y en la
+página de estado.** Se comprueba **cargándolo** y no mirando si el
+directorio existe: lo que hace funcionar el scoring no es que haya una
+carpeta, son los seis YAML con la forma esperada. Es la diferencia entre «no
+puntúa» y «no puntúa *por esto*». No cuenta para el estado general, y eso es
+deliberado: hasta que M3 traiga el clon no existe en la VM, y marcar el
+contenedor como enfermo por eso lo reiniciaría en bucle.
+
+### El coste, medido y no estimado
+
+Con `gpt-5.6-terra` y un anuncio de tamaño realista (~5.700 tokens de
+entrada), medido con la tabla de tarifas del repositorio:
+
+| Llamada | Entrada | Salida | Coste |
+|---|---|---|---|
+| extracción (M1) | 5.748 | 2.000 | $0,0355 |
+| scoring | 8.663 | 1.500 | $0,0353 |
+| variante | 7.443 | 300 | $0,0185 |
+
+**M2 multiplica por 2,5 el coste por oferta: de ~$0,035 a ~$0,089**, o
+~$0,083 si la caché de prompt cubre el bloque estable del scoring. El
+presupuesto de `ARCHITECTURE.md` §13 (~1 €/mes) daba para unas 30 ofertas al
+mes y ahora da para unas 12. La cifra hay que revisarla del lado del
+repositorio privado; aquí queda medida.
+
+### Desviaciones deliberadas
+
+- **`match`, `evidence_ref` y `cv_action` de `offer_requirements` se quedan
+  en NULL para siempre**, en contra de dónde el contrato dibuja el cruce.
+  Ver arriba el porqué; queda pendiente reflejarlo en
+  `OFFER_DATA_CONTRACT.md` del repositorio privado.
+- **`cv_action` no se rellena en ninguna tabla.** `ARCHITECTURE.md` §7
+  descarta la adaptación fina por vacante, así que nadie lo consumiría.
+- **El clon de solo lectura del repositorio privado sigue siendo M3.** Lo que
+  M2 monta es la frontera; en producción `DATA_REPO_PATH` no está puesto y
+  `/api/health` dice `not_configured`, que es la verdad.
+- **La descarga del PDF de la variante es M3.** La pantalla lo dice en vez de
+  dejar un botón que no hace nada.
+- **El listado no cambia.** Meter ahí el `value_score` sería empezar la
+  pantalla Pipeline, que no es esta rebanada, igual que el mapa valor ×
+  probabilidad y el kanban.
+- **Sin pantalla ni endpoint para repuntuar el histórico.** Es un módulo
+  ejecutable en el contenedor, con su test. Una interfaz para eso no la pide
+  nadie todavía.
+- **Sin tests de componentes en el frontend.** Se añaden los de los
+  ayudantes puros de `labels.ts`, y el comportamiento de la composición lo
+  cubre el E2E contra el stack levantado. Montar un harness de componentes
+  sería infraestructura nueva para una pantalla que no tiene interacción
+  propia.
+- **Siguen fuera shadcn/ui, TanStack, Motion, Sonner, cmdk, Recharts, Zod y
+  `openapi-typescript`.** La composición ponderada son rectángulos con un
+  ancho y un alto en porcentaje: se renderiza en servidor y funciona sin
+  JavaScript, que es más de lo que daría una librería de gráficos.
+- **Tres huecos de `config/scoring_model.yaml` se dejan como huecos**, con la
+  interpretación anotada y visible en pantalla en vez de rellenada. Ver la
+  sección siguiente.
+
+### Tres huecos del modelo de scoring, y qué hace el código mientras
+
+Los tres los ha destapado escribir la aritmética. Desde aquí no se escribe
+en el repositorio privado, así que el código no los rellena: los enseña.
+
+1. **`portfolio_assignment` no cubre `very_low`.** Reparte `high`, `medium` y
+   `low`, y `effort_tier` sí contempla `very_low` (`cheap`), así que se
+   espera que existan. El código deja `portfolio_bucket` en NULL **con su
+   motivo**, que se pinta en pantalla. Asignarle `aspirational` sería
+   inventarse una regla que nadie ha decidido; un hueco con su motivo hace
+   que se arregle el YAML.
+2. **`portfolio_assignment` no declara orden de evaluación y sus reglas se
+   solapan.** Una oferta de familia fuera del objetivo con valor 2,0 encaja
+   en `discard` y en `experimental` a la vez. El código aplica `discard` →
+   `experimental` → reparto por banda, apoyándose en que el YAML dice de
+   `discard` que no depende de la probabilidad. Es una interpretación y está
+   anotada como tal en el código.
+3. **El orden declarado de `effort_tier` tiene una consecuencia que parece un
+   error.** Con `[skip, cheap, full, standard]`, una oferta de valor 4,4 sin
+   ningún filtro en `fail` pero con alguno en `pending` sale `cheap` y no
+   `full`, porque `cheap` se evalúa antes. La nota del YAML solo menciona el
+   solape con `standard`. El código respeta el orden declarado sin
+   corregirlo —el YAML manda— y hay un test cuyo único propósito es que
+   dentro de un mes esto no parezca un fallo.
+
+Un cuarto, menor: una familia de puesto **ausente** en la extracción no es
+«fuera del objetivo». El código no dispara `experimental` con un NULL y
+sigue al reparto por banda.
+
+### Verificación en esta máquina, 2026-09-04
+
+- `make check`: 22 tests de `cv_builder`, **294** de la API y **14** del
+  frontend; ruff, `ruff format`, `mypy --strict`, eslint y `tsc --noEmit`
+  limpios en los tres.
+- `make migrate-check`: `upgrade`, `check`, `downgrade base` y `upgrade`
+  otra vez, sin deriva, con la migración 0002 y su ciclo del vocabulario de
+  `job_runs.kind`.
+- `make up`: los seis servicios sanos, y `/api/health` con
+  `data_repo: ok` contra el repositorio sintético montado de solo lectura.
+- `make e2e`: los **10** tests de Playwright en verde, incluido el recorrido
+  entero —pegar, extraer, **puntuar**, ver la composición— sin pedir la
+  puntuación en ningún momento: la encadena la extracción.
+- Una oferta inventada pegada por la API y puntuada por el worker de punta a
+  punta, con sus cuatro dimensiones, tres filtros, cinco cruces de requisito
+  y su variante en la base de datos.
+- El cargador probado contra los **dos** repositorios: el sintético (cuatro
+  dimensiones, cuatro variantes) y el privado real (seis dimensiones, cuatro
+  filtros, cinco variantes, trece evidencias utilizables), sin tocar nada de
+  este último.
+- `python -m futuro_api.assessment.recompute` dentro del contenedor:
+  idempotente en la primera pasada y repuntuando las cinco ofertas con
+  `--force`.
+- La composición ponderada revisada en una captura real, que es donde se vio
+  el problema de los dos huecos contiguos.
+
+**Sin verificar, y no se puede desde aquí:** una puntuación con el modelo de
+verdad. Todo corre con `LLM_PROVIDER=stub`. Y el deploy sigue sin estrenar,
+así que el camino `DATA_REPO_PATH` sin configurar en producción está
+probado en tests pero no visto en la VM.
