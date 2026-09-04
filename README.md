@@ -30,10 +30,15 @@ workflow de deploy. El deploy a la VM de Oracle está escrito y sin estrenar:
 la VM, el dominio y el cliente OAuth se provisionan a mano siguiendo
 `docs/deployment.md`.
 
-M1 (ingesta y extracción) está en curso: las tablas de las capas `capture` y
-`extraction` del contrato de datos, el módulo de LLM aislado con registro de
-coste por llamada, y las reglas que validan en Python lo que el modelo
-devuelve. Quedan la cola, los endpoints y la pantalla de la oferta.
+M1 (ingesta y extracción) está cerrada: pegar el texto de una oferta,
+extraerla con el LLM en segundo plano y ver lo extraído con la evidencia de
+cada campo al lado —la cita literal cuando consta, el razonamiento y la
+confianza cuando se dedujo, «sin datos» cuando no aparece—. El LLM elige y
+cita; el código valida en Python, degrada lo que el contrato manda degradar y
+deja constancia de cada corrección. Con esto entran los seis servicios de la
+arquitectura: `redis` y `worker` incluidos.
+
+Siguiente: M2, scoring y recomendación de variante.
 
 ## Desarrollo local
 
