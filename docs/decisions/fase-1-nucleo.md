@@ -1328,3 +1328,65 @@ configuración.
 prompt.** Se anotó al cerrar M2 como reversible y como decisión pendiente;
 queda cerrada. Aunque, según el hallazgo de arriba, hoy no es lo que
 desbloquea esa dimensión.
+
+## 2026-09-05 — La versión 2 del modelo de scoring, implementada
+
+`Futuro` cerró las cuatro decisiones que la llamada real destapó y publicó
+`config/scoring_model.yaml` v2. Tres de ellas necesitaban código de este
+lado, porque sus predicados viven en `assessment/scoring.py` y no en el YAML.
+
+**`expected_net_savings` → `gross_compensation_vs_baseline`, midiendo contra
+el bruto anual.** No necesitó ni una línea de código, y esa es la
+comprobación de que el diseño era correcto: los nombres de dimensión son
+vocabulario libre, y el cargador los lee del YAML en el trabajo siguiente.
+Repuntuada la misma oferta con v2, la dimensión sacó un **4** —interpolando
+entre el ancla de 3 (45.000-55.000) y la de 5 (≥70.000) para una banda
+publicada de 55.000-70.000— donde con v1 quedaba sin puntuar. Era el
+objetivo del cambio y se cumple.
+
+**`very_low` pasa a `aspirational`.** El reparto por banda deja de ser un
+`.get` con rama de reserva y pasa a ser una tabla, `BUCKET_OF_BAND`, indexada
+directamente. Un test comprueba que cubre las cuatro bandas: sin él, añadir
+una banda al vocabulario dejaría otra vez un hueco silencioso o un
+`KeyError`. Se anota que el hueco **se arregló porque se veía**: el código no
+se inventó el cubo, dejó el NULL con su motivo en pantalla, y eso es lo que
+provocó la decisión.
+
+**El orden de los cubos queda confirmado, no corregido.** `discard` →
+`experimental` → reparto por banda era una interpretación de este código
+porque el YAML no declaraba orden; ahora `portfolio_assignment.note` la fija
+con sus motivos. El código no cambia; el docstring deja de decir «es una
+interpretación».
+
+**`cheap` se estrecha, y `full` deja de ser inalcanzable.** El hueco de
+«filtros en pending» queda acotado a valor entre 3,0 y 4,0; `very_low` sigue
+sin tope, porque tiene que ser `cheap` aunque el valor sea alto. Esa
+asimetría es exactamente la razón por la que reordenar no servía. La misma
+oferta de 4,40 con un filtro pendiente pasa de `cheap` a `full`.
+
+### Un hallazgo que no es del scoring y conviene no perder
+
+Repuntuar la **misma** oferta con v2 movió dos dimensiones cuyas anclas no
+habían cambiado: `career_capital_and_brand` pasó de 1 a 3 —dos puntos en una
+dimensión que pesa 20— y `compensation_upside` de 0 a sin puntuar. El valor
+subió de 1,63 a 2,94, y solo una parte de esa subida es atribuible al cambio
+de anclas.
+
+Es variación del modelo, no un fallo del código: `llm/openai_client.py` no
+fija `temperature` ni `seed`, así que dos llamadas con el mismo prompt no
+tienen por qué coincidir. Las tres consecuencias, por orden de importancia:
+
+1. **Repuntuar llamando al modelo no es idempotente**, y eso hace más valioso
+   el recálculo sin modelo de `recompute.py`, que sí lo es: reutiliza los
+   juicios guardados y solo rehace la aritmética.
+2. Comparar dos ofertas puntuadas en llamadas distintas arrastra ese ruido,
+   además del que ya arrastran por el `scoring_model_version`.
+3. La capa append-only es lo que hace el problema **visible**: las dos
+   puntuaciones están guardadas con su versión y su valor, y se ven una al
+   lado de la otra en la pantalla.
+
+No se toca el muestreo desde aquí. `gpt-5.6-terra` devuelve
+`reasoning_tokens` en las llamadas de extracción y scoring, y los modelos de
+razonamiento no siempre aceptan `temperature`, así que fijarla a ciegas
+podría romper el único camino que funciona. Es una decisión con su prueba
+pendiente, no un olvido.
