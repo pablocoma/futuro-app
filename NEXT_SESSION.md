@@ -1,6 +1,6 @@
 # Traspaso a la siguiente sesión
 
-Última actualización: 2026-09-04 (cierre de M2).
+Última actualización: 2026-09-05 (M2 cerrada y estrenada con el modelo real).
 
 Este archivo contiene el estado operativo del proyecto. Las reglas duraderas
 están en `AGENTS.md`; no deben duplicarse aquí.
@@ -175,9 +175,22 @@ sintético y el privado real—, y el repuntuado ejecutado en el contenedor.
 Y el CI de `dev` en verde tras subirlo: los siete jobs, incluidos gitleaks,
 las migraciones sobre Postgres y el E2E sobre el compose.
 
-**Lo único no verificado, y no se puede desde aquí:** una puntuación con el
-modelo de verdad. Todo corre con `LLM_PROVIDER=stub` contra el repositorio
-de datos sintético.
+**Estrenado con el modelo real el 2026-09-05**, con `gpt-5.6-terra` y el
+repositorio privado montado: una oferta inventada extraída y puntuada de
+punta a punta, **cero correcciones** en las dos llamadas, $0,071 en total
+($0,029 extracción + $0,034 scoring + $0,0075 variante). Ya no queda ninguna
+llamada sin estrenar en Fase 1.
+
+Enseñó tres cosas, todas en `docs/decisions/fase-1-nucleo.md`: que el cero
+se pintaba como una columna vacía (arreglado), que dos aserciones del E2E
+estaban atadas al repositorio sintético (arreglado, ahora pasa contra los
+dos), y un **cuarto hueco del modelo de scoring** que es el más importante
+de los cuatro: `expected_net_savings`, que pesa 20 sobre 100, quedó sin
+puntuar **aunque el anuncio publicaba la banda salarial**, porque sus anclas
+están escritas en euros de ahorro y llegar del bruto al ahorro exige estimar
+fiscalidad y coste de vida, que `missing_data.never` prohíbe. Puede quedar
+sin puntuar casi siempre. La salida es de `Futuro`: reescribir esas anclas
+en términos de bruto, o darle al modelo una fuente que pueda citar.
 
 **Aviso para cuando se abra el PR de `dev` a `main`:** el CI de M1
 (`fbed4ce`) se quedó en rojo por gitleaks, con un falso positivo

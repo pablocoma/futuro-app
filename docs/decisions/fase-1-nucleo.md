@@ -1161,22 +1161,27 @@ puntúa» y «no puntúa *por esto*». No cuenta para el estado general, y eso e
 deliberado: hasta que M3 traiga el clon no existe en la VM, y marcar el
 contenedor como enfermo por eso lo reiniciaría en bucle.
 
-### El coste, medido y no estimado
+### El coste, observado en una llamada real
 
-Con `gpt-5.6-terra` y un anuncio de tamaño realista (~5.700 tokens de
-entrada), medido con la tabla de tarifas del repositorio:
+Cifras de la **primera llamada real** al modelo (2026-09-05, `gpt-5.6-terra`,
+un anuncio inventado de tamaño medio), leídas de `llm_calls` y no estimadas:
 
-| Llamada | Entrada | Salida | Coste |
-|---|---|---|---|
-| extracción (M1) | 5.748 | 2.000 | $0,0355 |
-| scoring | 8.663 | 1.500 | $0,0353 |
-| variante | 7.443 | 300 | $0,0185 |
+| Llamada | Entrada | Salida | Razonamiento | Coste | Latencia |
+|---|---|---|---|---|---|
+| `offer_extraction` | 3.698 | 1.809 | 626 | $0,0291 | 18,3 s |
+| `offer_scoring` | 5.113 | 1.982 | 980 | $0,0340 | 23,0 s |
+| `cv_variant_choice` | 2.939 | 133 | 0 | $0,0075 | 2,3 s |
 
-**M2 multiplica por 2,5 el coste por oferta: de ~$0,035 a ~$0,089**, o
-~$0,083 si la caché de prompt cubre el bloque estable del scoring. El
-presupuesto de `ARCHITECTURE.md` §13 (~1 €/mes) daba para unas 30 ofertas al
-mes y ahora da para unas 12. La cifra hay que revisarla del lado del
-repositorio privado; aquí queda medida.
+**M2 multiplica por 2,4 el coste por oferta: de ~$0,029 a ~$0,071.** El
+presupuesto de `ARCHITECTURE.md` §13 (~1 €/mes) daba para unas 37 ofertas al
+mes y ahora da para unas 15. Un anuncio más largo sube las tres cifras; el
+bloque estable del prompt de scoring (~3.700 tokens) es el que la caché del
+proveedor puede cubrir, y en esta primera llamada no la cubrió porque era la
+primera.
+
+La estimación previa a la llamada real —hecha con una aproximación de cuatro
+caracteres por token— daba ~$0,089, un 25% de más. Se sustituye por lo
+observado.
 
 ### Desviaciones deliberadas
 
@@ -1265,7 +1270,61 @@ sigue al reparto por banda.
 - La composición ponderada revisada en una captura real, que es donde se vio
   el problema de los dos huecos contiguos.
 
-**Sin verificar, y no se puede desde aquí:** una puntuación con el modelo de
-verdad. Todo corre con `LLM_PROVIDER=stub`. Y el deploy sigue sin estrenar,
-así que el camino `DATA_REPO_PATH` sin configurar en producción está
-probado en tests pero no visto en la VM.
+**Sin verificar al cerrar M2:** una puntuación con el modelo de verdad. Todo
+corría con `LLM_PROVIDER=stub`. Se hizo al día siguiente y tiene su propia
+entrada abajo. El deploy sigue sin estrenar, así que el camino
+`DATA_REPO_PATH` sin configurar en producción está probado en tests pero no
+visto en la VM.
+
+## 2026-09-05 — La primera llamada real, y lo que enseñó
+
+M2 se cerró el 2026-09-04 con todo verificado contra `LLM_PROVIDER=stub`. Al
+día siguiente se hizo la primera llamada real con `gpt-5.6-terra` y el
+repositorio privado montado. Se anota aparte porque cambió tres cosas.
+
+**Funcionó, y con cero correcciones en las dos llamadas.** Ni una cita
+inventada, ni una nota sin cita, ni un filtro decidido sin poder citarlo, ni
+una variante que no existe. Es el resultado que la cuenta de `corrections`
+existe para medir, y en la primera oferta salió a cero. La variante elegida
+vino además con el motivo en la forma que el prompt pide: por qué esa y
+contra cuál la descartó.
+
+**Hallazgo que hay que llevarse a `Futuro`, y es el cuarto hueco:
+`expected_net_savings` quedó sin puntuar aunque el anuncio publicaba la
+banda salarial.** El motivo que dio el modelo es exactamente el correcto:
+«se publica salario bruto, pero no constan fiscalidad ni costes de vida
+aplicables para calcular el ahorro anual frente a Madrid sin estimarlos». Las
+anclas de esa dimensión están escritas **en euros de ahorro**, y llegar del
+bruto al ahorro exige estimar impuestos y coste de vida, que es justo lo que
+`missing_data.never` prohíbe.
+
+La consecuencia es más fuerte de lo que se anotó al cerrar M2: no es que la
+dimensión quede sin puntuar en los anuncios sin salario, es que **puede
+quedar sin puntuar casi siempre**, incluso con salario publicado. Pesa 20
+sobre 100. Mandar `baseline_madrid` en el prompt no lo arregla, porque el
+problema no es la referencia sino el salto del bruto al ahorro. Las salidas
+son de `Futuro`, no de aquí: reescribir esas anclas en términos de bruto, o
+darle al modelo una fuente de fiscalidad y coste de vida que pueda citar.
+
+**Defecto de la pantalla que solo los datos reales podían enseñar: un cero se
+pintaba como una columna vacía.** El cliente simulado puntúa siempre un 3, así
+que la altura nunca era cero; con el modelo de verdad,
+`compensation_upside` sacó un 0 —anclado y bien razonado— y la barra
+desaparecía, indistinguible de un hueco. Y esa distinción es medio proyecto:
+un cero **es** una nota. Ahora la barra tiene un mínimo de dos píxeles y el
+número se saca fuera cuando no cabe dentro.
+
+**Fragilidad del E2E que apareció al apuntar al repositorio real:** dos
+aserciones estaban atadas al vocabulario del repositorio sintético —el
+nombre de una dimensión y el peso 40—, así que `make e2e` se caía en cuanto
+`DATA_REPO_HOST_PATH` apuntaba al privado, aunque la aplicación funcionara.
+Se sustituyen por comprobaciones de **forma**: que la etiqueta llega
+humanizada —inicial en mayúscula, sin guiones bajos— y que el peso es un
+número. Ahora el E2E pasa contra los dos repositorios, que es lo que tiene
+que hacer un test cuyo objeto es el mecanismo y no el contenido de una
+configuración.
+
+**Decisión confirmada por Pablo el 2026-09-05: `baseline_madrid` va en el
+prompt.** Se anotó al cerrar M2 como reversible y como decisión pendiente;
+queda cerrada. Aunque, según el hallazgo de arriba, hoy no es lo que
+desbloquea esa dimensión.
