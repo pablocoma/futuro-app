@@ -45,6 +45,75 @@ export const STATUS_LABELS: Record<string, string> = {
   failed: "fallida",
 };
 
+export const ASSESSMENT_STATUS_LABELS: Record<string, string> = {
+  none: "sin puntuar",
+  queued: "en cola",
+  running: "puntuando",
+  succeeded: "puntuada",
+  failed: "fallida",
+};
+
+/**
+ * Los estados de los filtros, los cubos de cartera y los niveles de
+ * esfuerzo. Estos sí se traducen aquí porque son vocabulario de **código**:
+ * la aplicación ramifica sobre ellos para calcular, así que no pueden
+ * cambiar de nombre desde el YAML.
+ *
+ * Los nombres de dimensión y de filtro, en cambio, viven en
+ * `config/scoring_model.yaml` del repositorio privado y **no** tienen mapa
+ * aquí: traducirlos sería duplicar en este repositorio público el
+ * vocabulario del privado, que es justo lo que no se hace. Se pintan
+ * humanizando el identificador, y el día que hagan falta etiquetas de
+ * verdad, van en ese YAML.
+ */
+export const GATE_STATUS_LABELS: Record<string, string> = {
+  pass: "cumple",
+  stretch: "justo por debajo",
+  pending: "sin comprobar",
+  fail: "no cumple",
+};
+
+export const PORTFOLIO_LABELS: Record<string, string> = {
+  realistic: "realista",
+  realistic_stretch: "realista con esfuerzo",
+  aspirational: "aspiracional",
+  experimental: "experimental",
+  discard: "descartar",
+};
+
+export const EFFORT_LABELS: Record<string, string> = {
+  full: "candidatura completa",
+  standard: "variante base con ajuste mínimo",
+  cheap: "solo si postularse es barato",
+  skip: "registrar y no enviar",
+};
+
+export const PROBABILITY_LABELS: Record<string, string> = {
+  high: "alta",
+  medium: "media",
+  low: "baja",
+  very_low: "muy baja",
+};
+
+export const MATCH_LABELS: Record<string, string> = {
+  meets: "cumple",
+  partial: "parcial",
+  no_evidence: "sin evidencia",
+};
+
+/**
+ * Un identificador del repositorio de datos, legible.
+ *
+ * `expected_net_savings` → «Expected net savings». No se traduce: el
+ * vocabulario es del repositorio privado y aquí no se duplica. Humanizar el
+ * identificador es feo y no oculta nada, que es el mismo criterio que
+ * `labelFor` aplica a un campo sin etiqueta.
+ */
+export function humanise(identifier: string): string {
+  const words = identifier.replaceAll("_", " ").trim();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 export function labelFor(name: string): string {
   return FIELD_LABELS[name] ?? name;
 }
