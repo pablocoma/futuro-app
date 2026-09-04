@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -17,6 +18,7 @@ from futuro_api.jobs import tasks
 from futuro_api.jobs.tasks import extract_offer
 from futuro_api.llm.stub import StubClient
 from futuro_api.offers import extraction, schemas
+from futuro_api.offers import repository as offers_repo
 from futuro_api.offers import vocabularies as vocab
 from tests.conftest import FakeQueue, client_with_queue
 from tests.synthetic import ADVERT, absent, good_draft, published
@@ -380,3 +382,37 @@ async def test_reextracting_keeps_the_old_version(
     # La vigente es la última, y es la que se enseña.
     assert body["extraction"]["id"] == body["versions"][0]["id"]
     assert body["extraction"]["identification"][0]["value"] == "Ingeniero de Datos"
+
+
+async def test_two_simultaneous_pastes_of_the_same_advert_do_not_collide(
+    api: tuple[TestClient, FakeQueue],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """La carrera entre la comprobación y el INSERT, forzada a mano.
+
+    Pasa de verdad con un doble clic en el botón de capturar, y la destapó
+    el E2E corriendo sus tests en paralelo. Se simula haciendo que la
+    comprobación de duplicado mienta una vez: entonces el INSERT choca con
+    la unicidad de `raw_text_sha256`, que está en la base de datos
+    justamente para que esto no dependa de quién llegue antes.
+    """
+    client, _ = api
+    first = _ingest(client).json()
+
+    real = offers_repo.find_capture_by_sha256
+    calls = {"n": 0}
+
+    async def lies_once(session: Any, sha: str) -> Any:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return None
+        return await real(session, sha)
+
+    monkeypatch.setattr(offers_repo, "find_capture_by_sha256", lies_once)
+
+    response = _ingest(client)
+
+    # Ni 500 ni una segunda captura: se recoge la que ganó la carrera.
+    assert response.status_code == 202
+    assert response.json()["capture_id"] == first["capture_id"]
+    assert len(client.get("/api/offers").json()) == 1

@@ -130,7 +130,11 @@ jobs:
       - name: Levantar el stack
         run: |
           cp .env.example .env
-          docker compose up --build -d --wait --wait-timeout 240
+          docker compose up --build -d --wait --wait-timeout 300
+          # Igual que en el deploy: el contenedor no migra al arrancar, se
+          # migra como un paso aparte. Sin esto no hay tablas y la ingesta
+          # falla, que es justo lo que el E2E viene a comprobar.
+          docker compose exec -T api alembic upgrade head
 
       - uses: actions/setup-node@v4
         with:

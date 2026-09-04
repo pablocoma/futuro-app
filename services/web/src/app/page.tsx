@@ -1,15 +1,18 @@
+import Link from "next/link";
+
 import { getCurrentUser, getHealth } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Página de M0. No es decorativa: es la comprobación de que las cuatro
- * piezas del esqueleto están vivas y hablan entre ellas —Caddy sirviendo,
- * `web` renderizando en servidor, `api` respondiendo y Postgres
- * alcanzable— y de que la sesión que ve el navegador es la que ve el
- * backend.
+ * Portada. Sigue siendo la comprobación de que las piezas están vivas y
+ * hablan entre ellas —Caddy sirviendo, `web` renderizando en servidor,
+ * `api` respondiendo, Postgres y Redis alcanzables— y de que la sesión que
+ * ve el navegador es la que ve el backend.
  *
- * Las siete pantallas reales de `docs/APP_SCREENS.md` empiezan en M1.
+ * Con M1 gana lo único que hacía falta para que sirva de algo: la puerta a
+ * capturar una oferta y a ver las capturadas. La navegación de verdad
+ * —barra lateral en escritorio, inferior en móvil, ⌘K— es de más adelante.
  */
 export default async function Page() {
   const [health, user] = await Promise.all([getHealth(), getCurrentUser()]);
@@ -18,12 +21,26 @@ export default async function Page() {
     <main className="mx-auto flex min-h-dvh max-w-2xl flex-col justify-center gap-8 px-6 py-16">
       <header className="space-y-2">
         <p className="font-mono text-xs uppercase tracking-widest text-ink3">
-          Fase 1 · M0 · esqueleto
+          Fase 1 · M1 · ingesta y extracción
         </p>
         <h1 className="text-2xl font-semibold tracking-tight">futuro-app</h1>
         <p className="text-sm text-ink2">
           De una oferta de trabajo a una candidatura lista para enviar.
         </p>
+        <nav className="flex flex-wrap gap-3 pt-2">
+          <Link
+            href="/capturar"
+            className="rounded-md bg-acc px-3 py-1.5 text-sm font-medium text-bg transition-opacity hover:opacity-90"
+          >
+            Pegar una oferta
+          </Link>
+          <Link
+            href="/ofertas"
+            className="rounded-md border border-white/15 px-3 py-1.5 text-sm text-ink2 transition-colors hover:border-acc hover:text-acc"
+          >
+            Ofertas capturadas
+          </Link>
+        </nav>
       </header>
 
       <section className="rounded-lg border border-white/10 bg-white/[0.02]">
@@ -41,6 +58,13 @@ export default async function Page() {
           <Row label="postgres">
             {health ? (
               <Signal ok={health.database === "ok"}>{health.database}</Signal>
+            ) : (
+              <span className="text-ink3">—</span>
+            )}
+          </Row>
+          <Row label="redis">
+            {health ? (
+              <Signal ok={health.queue === "ok"}>{health.queue}</Signal>
             ) : (
               <span className="text-ink3">—</span>
             )}
