@@ -195,13 +195,14 @@ de `expected_net_savings` a `gross_compensation_vs_baseline` no necesitó
 código —los nombres de dimensión son vocabulario libre—, y repuntuada la
 misma oferta con v2 esa dimensión sacó un 4 donde antes quedaba sin puntuar.
 
-**Lo que queda abierto de ahí, y es decisión de Pablo:** repuntuar la misma
-oferta movió dos dimensiones cuyas anclas no habían cambiado —una de ellas
-dos puntos sobre un peso de 20—. Es variación del modelo:
-`llm/openai_client.py` no fija `temperature` ni `seed`. No se ha tocado
-porque `gpt-5.6-terra` razona y los modelos de razonamiento no siempre
-aceptan `temperature`; fijarla a ciegas podría romper el único camino que
-funciona. Probarlo cuesta una llamada.
+**Lo que queda abierto de ahí:** repuntuar la misma oferta movió dos
+dimensiones cuyas anclas no habían cambiado —una de ellas dos puntos sobre
+un peso de 20—. Es variación del modelo. **Fijar `temperature` no vale: se
+probó el 2026-09-05 y `gpt-5.6-terra` lo rechaza con un 400**, porque es un
+modelo de razonamiento. Queda `seed`, sin probar y sin garantía, o aceptar
+la variación y apoyarse en que `recompute.py` sí es idempotente, que es lo
+que ya está construido. No hay nada que arreglar en el código: hay una
+propiedad del modelo que conviene conocer al leer dos puntuaciones.
 
 **Aviso para cuando se abra el PR de `dev` a `main`:** el CI de M1
 (`fbed4ce`) se quedó en rojo por gitleaks, con un falso positivo

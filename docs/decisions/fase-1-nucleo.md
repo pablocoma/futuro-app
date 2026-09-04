@@ -1385,8 +1385,24 @@ tienen por qué coincidir. Las tres consecuencias, por orden de importancia:
    puntuaciones están guardadas con su versión y su valor, y se ven una al
    lado de la otra en la pantalla.
 
-No se toca el muestreo desde aquí. `gpt-5.6-terra` devuelve
-`reasoning_tokens` en las llamadas de extracción y scoring, y los modelos de
-razonamiento no siempre aceptan `temperature`, así que fijarla a ciegas
-podría romper el único camino que funciona. Es una decisión con su prueba
-pendiente, no un olvido.
+**Se probó fijar `temperature = 0.0`, y `gpt-5.6-terra` lo rechaza.** La
+llamada devuelve un 400 del proveedor: «Unsupported parameter: 'temperature'
+is not supported with this model.» Es un modelo de razonamiento, y en esta
+familia el muestreo no se controla por ahí. El cambio se revirtió el mismo
+día sin llegar a commitearse; las tres llamadas de prueba fallaron antes de
+facturar, así que costó cero.
+
+Queda escrito para que no se vuelva a intentar. Las otras dos vías, sin
+probar:
+
+- `seed`, que tampoco se sabe si esta familia acepta y cuesta otra llamada
+  averiguarlo. Y aunque lo aceptara, la documentación del proveedor lo
+  describe como «best effort», no como una garantía.
+- Aceptar la variación y apoyarse en que **`recompute.py` sí es
+  idempotente**: reutiliza los juicios guardados y solo rehace la
+  aritmética. Es lo que ya está construido, y es la razón por la que
+  repuntuar el histórico no llama al modelo.
+
+La conclusión práctica no cambia: repuntuar **llamando al modelo** no es
+reproducible, repuntuar **sin llamarlo** sí, y la capa append-only es lo que
+hace visible la diferencia.
