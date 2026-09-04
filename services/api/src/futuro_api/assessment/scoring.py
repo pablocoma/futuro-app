@@ -43,10 +43,13 @@ from futuro_api.data_repo.models import ScoringModel
 
 logger = logging.getLogger(__name__)
 
-# Umbrales leídos a mano de `config/scoring_model.yaml` el 2026-09-04, de
-# `portfolio_assignment` y de `output.effort_tier`. Cambiarlos allí obliga a
-# cambiarlos aquí; el hash del YAML que se guarda en cada fila es lo que
-# permite saber después qué filas se puntuaron con qué texto.
+# Umbrales leídos a mano de `config/scoring_model.yaml`, de
+# `portfolio_assignment` y de `output.effort_tier`. Copiados el 2026-09-04 de
+# la versión 1 y revisados el 2026-09-05 contra la versión 2, que no los
+# cambió: lo que la v2 cambió fueron los predicados que los usan.
+# Cambiarlos allí obliga a cambiarlos aquí; el hash del YAML que se guarda en
+# cada fila es lo que permite saber después qué filas se puntuaron con qué
+# texto.
 VALUE_FLOOR = Decimal("3.0")
 VALUE_FULL_EFFORT = Decimal("4.0")
 
@@ -56,6 +59,18 @@ VALUE_FULL_EFFORT = Decimal("4.0")
 # cosas distintas y con dos decimales serían el mismo número.
 _VALUE_PLACES = Decimal("0.01")
 _COVERAGE_PLACES = Decimal("0.001")
+
+
+# El reparto por banda de `portfolio_assignment`. `very_low` comparte cubo
+# con `low` desde el 2026-09-05: no puede tener uno propio, porque los cinco
+# nombres de `PortfolioBucket` son vocabulario de código y el cargador
+# prohíbe ampliarlos.
+BUCKET_OF_BAND: dict[data_vocab.ProbabilityBand, data_vocab.PortfolioBucket] = {
+    data_vocab.ProbabilityBand.HIGH: data_vocab.PortfolioBucket.REALISTIC,
+    data_vocab.ProbabilityBand.MEDIUM: data_vocab.PortfolioBucket.REALISTIC_STRETCH,
+    data_vocab.ProbabilityBand.LOW: data_vocab.PortfolioBucket.ASPIRATIONAL,
+    data_vocab.ProbabilityBand.VERY_LOW: data_vocab.PortfolioBucket.ASPIRATIONAL,
+}
 
 
 @dataclass(frozen=True)
@@ -154,21 +169,23 @@ def _portfolio_bucket(
 ) -> tuple[data_vocab.PortfolioBucket | None, str | None]:
     """El cubo de cartera, o ninguno con su motivo.
 
-    `portfolio_assignment` no declara orden de evaluación y sus reglas se
-    solapan —una oferta de familia fuera del objetivo con valor 2,0 encaja
-    a la vez en `discard` y en `experimental`—, así que el orden lo pone
-    este código: primero `discard`, porque el YAML dice «con independencia
-    de la probabilidad»; después `experimental`; y al final el reparto por
-    banda. Es una interpretación, y está anotada como tal en
-    `docs/decisions/fase-1-nucleo.md`.
+    El orden —`discard`, `experimental`, y al final el reparto por banda— lo
+    **confirma** `portfolio_assignment.note` desde el 2026-09-05. Hasta
+    entonces era una interpretación de este código, porque el YAML no
+    declaraba orden y sus reglas se solapan: una oferta de familia fuera del
+    objetivo con valor 2,0 encaja a la vez en `discard` y en `experimental`.
+    Los motivos que fijó la configuración son que `discard` es un suelo
+    absoluto e independiente de los demás ejes, y que estar fuera de
+    `objectives.role_families.core` es una vía distinta —exploración— y no
+    una posición más del embudo principal.
 
-    Dos huecos del YAML se dejan como huecos a propósito, con su motivo, en
-    vez de rellenarlos:
+    `very_low` va a `aspirational` junto con `low`, también desde el
+    2026-09-05. No puede tener cubo propio: los cinco nombres de
+    `PortfolioBucket` son vocabulario de código y el cargador prohíbe
+    ampliarlos.
 
-    - sin puntuación no hay valor con el que decidir nada;
-    - `very_low` no tiene cubo asignado, aunque `effort_tier` sí la
-      contempla. Meterla en `aspirational` sería inventarse una regla que
-      nadie ha decidido.
+    Queda un solo hueco, y es el honesto: sin puntuación no hay valor con el
+    que decidir nada, así que no hay cubo y se dice por qué.
 
     Una familia de puesto ausente en la extracción tampoco es «fuera del
     objetivo»: es «no consta», así que no dispara `experimental` y se sigue
@@ -184,20 +201,11 @@ def _portfolio_bucket(
     if role_family is not None and role_family not in core_role_families:
         return data_vocab.PortfolioBucket.EXPERIMENTAL, None
 
-    by_band = {
-        data_vocab.ProbabilityBand.HIGH: data_vocab.PortfolioBucket.REALISTIC,
-        data_vocab.ProbabilityBand.MEDIUM: data_vocab.PortfolioBucket.REALISTIC_STRETCH,
-        data_vocab.ProbabilityBand.LOW: data_vocab.PortfolioBucket.ASPIRATIONAL,
-    }
-    bucket = by_band.get(band)
-    if bucket is None:
-        return None, (
-            f"el modelo de scoring no asigna cubo a una oferta de valor "
-            f"{value} y probabilidad «{band.value}»: «portfolio_assignment» "
-            "reparte high, medium y low, y deja very_low sin cubo. Asignarle "
-            "uno sería inventarse una regla."
-        )
-    return bucket, None
+    # Índice directo y no `.get`: el reparto cubre las cuatro bandas desde
+    # que `very_low` tiene cubo, y `tests/test_scoring.py` comprueba que no
+    # se queda ninguna fuera. Un `.get` con rama de reserva volvería a dejar
+    # sitio a un hueco silencioso.
+    return BUCKET_OF_BAND[band], None
 
 
 def _effort_tier(
@@ -210,11 +218,22 @@ def _effort_tier(
 
     El orden lo manda `output.effort_tier.evaluation_order` y este código lo
     respeta tal cual, sin reordenarlo por lo que parezca más razonable.
-    Tiene una consecuencia que conviene leer dos veces, porque a un mes
-    vista parece un error: con `[skip, cheap, full, standard]`, una oferta de
-    valor 4,5 sin ningún filtro en `fail` pero con alguno en `pending` sale
-    `cheap` y no `full`, porque `cheap` se evalúa antes. La nota del YAML
-    solo menciona el solape con `standard`, pero el orden es el que es.
+
+    **Historia de la condición de `cheap`, porque explica por qué es rara.**
+    Tal como estaba escrita hasta el 2026-09-05 —«valor >= 3.0 con filtros
+    en pending o probabilidad very_low», sin tope superior— y evaluándose
+    antes que `full`, ganaba siempre que hubiera un filtro pendiente. Y
+    pendiente es el caso habitual: el propio YAML dice de
+    `acceptable_conditions` que esas condiciones «rara vez se publican», y en
+    la primera puntuación real salió pendiente. El efecto es que `full`
+    —adaptar la variante, escribir al recruiter, investigar la empresa— casi
+    nunca llegaba a activarse.
+
+    Reordenar no lo arreglaba: poner `full` delante le habría dado `full` a
+    una oferta `very_low` excelente, y la configuración dice que `very_low`
+    debe ser `cheap`. Así que lo que se estrechó fue la condición: el hueco
+    de «filtros en pending» queda acotado a valor entre 3,0 y 4,0, y solo
+    `very_low` sigue sin tope de valor.
     """
     any_fail = any(gate.status is vocab.GateStatus.FAIL for gate in gates)
     any_pending = any(gate.status is vocab.GateStatus.PENDING for gate in gates)
@@ -223,10 +242,17 @@ def _effort_tier(
         if tier == data_vocab.EffortTier.SKIP:
             return any_fail or value is None or value < VALUE_FLOOR
         if tier == data_vocab.EffortTier.CHEAP:
+            # El hueco de «filtros en pending» queda acotado por arriba a
+            # 4,0 desde el 2026-09-05; `very_low` sigue sin tope, porque
+            # tiene que ser `cheap` aunque el valor sea alto. Ver el
+            # docstring: sin ese tope, `full` casi nunca se activaba.
             return (
                 value is not None
                 and value >= VALUE_FLOOR
-                and (any_pending or band is data_vocab.ProbabilityBand.VERY_LOW)
+                and (
+                    (any_pending and value < VALUE_FULL_EFFORT)
+                    or band is data_vocab.ProbabilityBand.VERY_LOW
+                )
             )
         if tier == data_vocab.EffortTier.FULL:
             return value is not None and value >= VALUE_FULL_EFFORT and not any_fail
