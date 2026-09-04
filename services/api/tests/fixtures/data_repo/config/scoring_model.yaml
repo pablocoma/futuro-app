@@ -13,9 +13,9 @@
 # Si algún día un test pasa por casualidad porque alguien escribió en el
 # código el nombre de una dimensión real, aquí se caerá.
 
-version: 7
+version: 8
 status: active
-updated_at: 2031-04-02
+updated_at: 2031-04-05
 
 description: >-
   Modelo de comparación de vacantes de una cartógrafa inventada que quiere
@@ -87,10 +87,15 @@ probability_bands:
   very_low: >-
     Varios requisitos duros sin cubrir. Se registra por aprendizaje.
 
+# Los cinco nombres son los del repositorio real y no inventados, y eso es
+# deliberado: son vocabulario de **código** —la aplicación ramifica sobre
+# ellos para calcular— así que renombrarlos aquí no probaría nada, rompería
+# el cargador. Lo inventado son las dimensiones, los filtros y las variantes,
+# que sí son libres.
 portfolio_assignment:
   realistic: probabilidad high y valor >= 3.0
   realistic_stretch: probabilidad medium y valor >= 3.0
-  aspirational: probabilidad low y valor >= 3.0
+  aspirational: probabilidad low o very_low y valor >= 3.0
   experimental: familia fuera de objectives.role_families.core
   discard: valor < 3.0, con independencia de la probabilidad
 
@@ -151,7 +156,9 @@ output:
       when: valor entre 3.0 y 4.0 y ningún filtro en fail
       do: Enviar la variante base con ajuste mínimo.
     cheap:
-      when: valor >= 3.0 pero con filtros en pending o probabilidad very_low
+      when: >-
+        valor entre 3.0 y 4.0 con filtros en pending, o probabilidad
+        very_low
       do: Solo si postularse es barato.
     skip:
       when: cualquier filtro en fail, o valor < 3.0, o cobertura insuficiente

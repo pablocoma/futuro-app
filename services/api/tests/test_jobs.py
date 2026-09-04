@@ -22,6 +22,7 @@ import sqlalchemy as sa
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from futuro_api import data_repo
 from futuro_api.assessment import calls as assessment_calls
 from futuro_api.assessment import prompt as assessment_prompt
 from futuro_api.assessment import repository as assessment_repo
@@ -419,10 +420,14 @@ async def test_a_successful_assessment_saves_the_score_and_the_variant(
         assert assessment.job_run_id == run_id
         assert assessment.source is assessment_vocab.AssessmentSource.LLM
         assert assessment.prompt_version == assessment_prompt.SCORING_PROMPT_VERSION
-        # La versión **y** el hash del modelo de scoring: `version: 1` no
-        # cambió las dos veces que el modelo cambió el 2026-08-13.
-        assert assessment.scoring_model_version == "7"
-        assert len(assessment.scoring_model_sha256) == 64
+        # La versión **y** el hash del modelo de scoring: la versión
+        # declarada no siempre cambia cuando el fichero sí —`version: 1` no
+        # se movió las dos veces que el modelo cambió el 2026-08-13— así que
+        # se guardan las dos. Se comprueban contra lo que el repositorio de
+        # datos declara, no contra un número escrito aquí.
+        declared = data_repo.load(DATA_REPO).scoring
+        assert assessment.scoring_model_version == declared.version
+        assert assessment.scoring_model_sha256 == declared.sha256
         variant = await assessment_repo.current_variant_recommendation(
             session, saved.id
         )

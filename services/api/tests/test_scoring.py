@@ -265,20 +265,33 @@ def test_a_family_that_is_absent_is_not_the_same_as_one_outside() -> None:
     assert result.portfolio_bucket is Bucket.REALISTIC_STRETCH
 
 
-def test_very_low_has_no_bucket_and_says_so() -> None:
-    """Un hueco del YAML que se deja como hueco, con su motivo.
+def test_very_low_shares_the_aspirational_bucket_with_low() -> None:
+    """El hueco que el NULL en pantalla consiguió que se arreglara.
 
-    `portfolio_assignment` reparte `high`, `medium` y `low` y deja
-    `very_low` sin cubo, aunque `effort_tier` sí la contempla. Asignarle
-    `aspirational` sería inventarse una regla que nadie ha decidido; un NULL
-    en pantalla con su motivo hace que se arregle el YAML.
+    Hasta el 2026-09-05 `portfolio_assignment` repartía `high`, `medium` y
+    `low` y dejaba `very_low` sin cubo, aunque `effort_tier` sí la
+    contempla. El código no se lo inventó: dejaba el cubo vacío con el
+    motivo escrito debajo, y eso es lo que hizo que se decidiera. No puede
+    tener cubo propio —los cinco nombres son vocabulario de código— así que
+    va con `low`.
     """
     result = compute(
         dimensions(ahorro_estimado=4, aprendizaje=4, ubicacion=4, encaje_de_rol=4),
         band=Band.VERY_LOW,
     )
-    assert result.portfolio_bucket is None
-    assert "very_low" in (result.portfolio_note or "")
+    assert result.portfolio_bucket is Bucket.ASPIRATIONAL
+    assert result.portfolio_note is None
+
+
+def test_every_probability_band_has_a_bucket() -> None:
+    """Ninguna banda se queda fuera del reparto.
+
+    Es lo que permite que `_portfolio_bucket` indexe la tabla directamente
+    en vez de usar `.get` con una rama de reserva: sin este test, añadir una
+    banda al vocabulario dejaría un hueco silencioso o un `KeyError` en
+    producción.
+    """
+    assert set(scoring.BUCKET_OF_BAND) == set(Band)
 
 
 # ---------------------------------------------------------------------------
@@ -313,15 +326,15 @@ def test_a_middling_value_with_everything_decided_is_standard_effort() -> None:
     assert result.effort_tier is Tier.STANDARD
 
 
-def test_a_pending_gate_beats_full_effort_because_the_yaml_says_so() -> None:
-    """La consecuencia del orden declarado que hay que leer dos veces.
+def test_a_pending_gate_no_longer_steals_full_effort_from_a_good_offer() -> None:
+    """El arreglo del 2026-09-05, y el porqué.
 
-    Con `evaluation_order: [skip, cheap, full, standard]`, una oferta de
-    valor 4,40 sin ningún filtro en `fail` pero con uno en `pending` sale
-    `cheap` y **no** `full`, porque `cheap` se evalúa antes. La nota del
-    YAML solo menciona el solape con `standard`. El código respeta el orden
-    declarado en vez de corregirlo: el YAML manda. Este test existe para
-    que dentro de un mes esto no parezca un fallo.
+    Con la condición anterior de `cheap` —«valor >= 3.0 con filtros en
+    pending», sin tope— y evaluándose antes que `full`, una oferta de 4,40
+    con un filtro pendiente salía `cheap`. Y pendiente es el caso habitual:
+    el propio modelo de scoring dice que esas condiciones «rara vez se
+    publican», y en la primera puntuación real salió pendiente. El efecto
+    era que `full` casi nunca se activaba.
     """
     result = compute(
         dimensions(ahorro_estimado=5, aprendizaje=4, ubicacion=4, encaje_de_rol=4),
@@ -330,14 +343,38 @@ def test_a_pending_gate_beats_full_effort_because_the_yaml_says_so() -> None:
         ),
     )
     assert result.value_score == Decimal("4.40")
+    assert result.effort_tier is Tier.FULL
+
+
+def test_a_pending_gate_still_makes_a_middling_offer_cheap() -> None:
+    """El hueco de `cheap` sigue existiendo, acotado entre 3,0 y 4,0.
+
+    Estrecharlo no era quitarlo: una oferta que solo llega al aprobado y
+    encima tiene condiciones sin comprobar es justamente donde «solo si
+    postularse es barato» significa algo.
+    """
+    result = compute(
+        dimensions(ahorro_estimado=3, aprendizaje=4, ubicacion=3, encaje_de_rol=3),
+        resolved=gates(
+            vocab.GateStatus.PASS, vocab.GateStatus.PENDING, vocab.GateStatus.PASS
+        ),
+    )
+    assert result.value_score == Decimal("3.30")
     assert result.effort_tier is Tier.CHEAP
 
 
 def test_a_very_low_probability_is_cheap_effort_even_with_a_good_value() -> None:
+    """`very_low` sí sigue sin tope de valor, y es deliberado.
+
+    Es la asimetría que hizo que reordenar no sirviera: poner `full` delante
+    de `cheap` le habría dado `full` a esta oferta, y el modelo de scoring
+    dice que `very_low` se registra «por aprendizaje, no por expectativa».
+    """
     result = compute(
         dimensions(ahorro_estimado=5, aprendizaje=4, ubicacion=4, encaje_de_rol=4),
         band=Band.VERY_LOW,
     )
+    assert result.value_score == Decimal("4.40")
     assert result.effort_tier is Tier.CHEAP
 
 
