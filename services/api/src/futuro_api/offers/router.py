@@ -22,8 +22,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from futuro_api.assessment import repository as assessment_repo
+from futuro_api.assessment import views as assessment_views
 from futuro_api.jobs import queue as job_queue
 from futuro_api.jobs import repository as jobs_repo
+from futuro_api.jobs import vocabularies as jobs_vocab
 from futuro_api.models import OfferCapture
 from futuro_api.offers import repository as offers_repo
 from futuro_api.offers import views
@@ -91,7 +94,9 @@ async def _state_of(
     session: AsyncSession, capture_id: uuid.UUID
 ) -> tuple[views.ExtractionStatus, uuid.UUID | None]:
     extraction = await offers_repo.current_extraction(session, capture_id)
-    run = await jobs_repo.latest_run_for_capture(session, capture_id)
+    run = await jobs_repo.latest_run_for_capture(
+        session, capture_id, kind=jobs_vocab.JobKind.OFFER_EXTRACTION
+    )
     return views.status_of(run, extraction), (extraction.id if extraction else None)
 
 
@@ -193,6 +198,59 @@ async def reextract(
     )
 
 
+class AssessResponse(BaseModel):
+    capture_id: uuid.UUID
+    extraction_id: uuid.UUID
+    job_run_id: uuid.UUID
+    assessment_status: assessment_views.AssessmentStatus
+
+
+@router.post(
+    "/{capture_id}/assess",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Vuelve a puntuar una oferta ya extraída",
+)
+async def assess(
+    capture_id: uuid.UUID, session: SessionDep, queue: QueueDep
+) -> AssessResponse:
+    """Encola una puntuación nueva. No sobrescribe la anterior.
+
+    En el camino normal no hace falta llamarlo: la extracción encadena la
+    puntuación al terminar bien. Existe para tres casos que sí pasan —que el
+    encolado encadenado fallara, que el repositorio de datos no estuviera
+    cuando tocaba, y que se quiera repuntuar una oferta concreta tras tocar
+    el modelo de scoring— y es el botón que la pantalla enseña cuando una
+    oferta se queda sin puntuar.
+
+    Repuntuar el histórico entero no es esto: es
+    `python -m futuro_api.assessment.recompute`, que no llama al modelo.
+    Este endpoint sí llama, porque también vuelve a elegir variante.
+    """
+    capture = await session.get(OfferCapture, capture_id)
+    if capture is None:
+        raise HTTPException(status_code=404, detail="esa oferta no existe")
+
+    extraction = await offers_repo.current_extraction(session, capture_id)
+    if extraction is None:
+        # 409 y no 404: la oferta existe, lo que no existe todavía es algo
+        # que puntuar. Un 404 haría pensar que la URL está mal.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "esa oferta no tiene ninguna extracción vigente todavía, así "
+                "que no hay nada que puntuar"
+            ),
+        )
+
+    run = await job_queue.enqueue_assessment(queue, session, capture_id)
+    return AssessResponse(
+        capture_id=capture_id,
+        extraction_id=extraction.id,
+        job_run_id=run.id,
+        assessment_status="queued",
+    )
+
+
 @router.get("", summary="Lista las ofertas capturadas")
 async def list_offers(
     session: SessionDep,
@@ -208,7 +266,9 @@ async def list_offers(
     captures = await offers_repo.list_captures(session, limit=limit, before=before)
     capture_ids = [capture.id for capture in captures]
     extractions = await offers_repo.current_extractions_for(session, capture_ids)
-    runs = await jobs_repo.latest_runs_for(session, capture_ids)
+    runs = await jobs_repo.latest_runs_for(
+        session, capture_ids, kind=jobs_vocab.JobKind.OFFER_EXTRACTION
+    )
 
     summaries = []
     for capture in captures:
@@ -233,23 +293,94 @@ async def list_offers(
     return summaries
 
 
+class OfferDetail(views.OfferView):
+    """La oferta entera: captura, extracción, puntuación y variante.
+
+    Hereda de `views.OfferView` en vez de anidarla, así que las claves que
+    M1 ya devolvía siguen exactamente donde estaban y M2 solo añade. La
+    herencia es también lo que evita que `offers/views.py` tenga que
+    importar `assessment/views.py`: la dirección de las dependencias es
+    `assessment` → `offers`, y el router es el único sitio que ve las dos
+    mitades.
+    """
+
+    assessment_status: assessment_views.AssessmentStatus
+    assessment_error: str | None = None
+    assessment: assessment_views.AssessmentView | None = None
+    variant_recommendation: assessment_views.VariantRecommendationView | None = None
+    assessment_versions: list[assessment_views.AssessmentVersionView] = []
+
+
 @router.get("/{capture_id}", summary="Una oferta con lo que se extrajo de ella")
-async def get_offer(capture_id: uuid.UUID, session: SessionDep) -> views.OfferView:
+async def get_offer(capture_id: uuid.UUID, session: SessionDep) -> OfferDetail:
     capture = await session.get(OfferCapture, capture_id)
     if capture is None:
         raise HTTPException(status_code=404, detail="esa oferta no existe")
 
     extraction = await offers_repo.current_extraction(session, capture_id)
-    run = await jobs_repo.latest_run_for_capture(session, capture_id)
+    run = await jobs_repo.latest_run_for_capture(
+        session, capture_id, kind=jobs_vocab.JobKind.OFFER_EXTRACTION
+    )
     versions = await offers_repo.extraction_versions(session, capture_id)
 
     cost = None
     if extraction is not None and extraction.job_run_id is not None:
         cost = await jobs_repo.cost_of_run(session, extraction.job_run_id)
 
-    return views.OfferView(
+    assessment = None
+    variant = None
+    assessment_versions: list[assessment_views.AssessmentVersionView] = []
+    assessment_view = None
+    if extraction is not None:
+        assessment = await assessment_repo.current_assessment(session, extraction.id)
+        variant = await assessment_repo.current_variant_recommendation(
+            session, extraction.id
+        )
+        assessment_versions = [
+            assessment_views.AssessmentVersionView(
+                id=version.id,
+                assessed_at=version.assessed_at,
+                source=version.source,
+                scoring_model_version=version.scoring_model_version,
+                value_score=(
+                    format(version.value_score, "f")
+                    if version.value_score is not None
+                    else None
+                ),
+            )
+            for version in await assessment_repo.assessment_versions(
+                session, extraction.id
+            )
+        ]
+    assessment_run = await jobs_repo.latest_run_for_capture(
+        session, capture_id, kind=jobs_vocab.JobKind.OFFER_ASSESSMENT
+    )
+    assessment_status = views.status_of(assessment_run, assessment)
+    if assessment is not None and extraction is not None:
+        assessment_view = assessment_views.assessment_view(
+            assessment,
+            total_weight=assessment_views.total_weight_of(assessment),
+            requirement_texts={
+                requirement.id: (requirement.position, requirement.text)
+                for requirement in extraction.requirements
+            },
+            cost_usd=await assessment_repo.cost_of_assessment(session, assessment),
+        )
+
+    return OfferDetail(
         capture=views.capture_view(capture),
         extraction_status=views.status_of(run, extraction),
+        assessment_status=assessment_status,
+        assessment_error=(
+            assessment_run.error
+            if assessment_run is not None and assessment_status == "failed"
+            else None
+        ),
+        assessment=assessment_view,
+        variant_recommendation=(
+            assessment_views.variant_view(variant) if variant is not None else None
+        ),
+        assessment_versions=assessment_versions,
         # Solo se enseña el error cuando el trabajo acabó mal: mientras se
         # reintenta, el error del intento anterior confundiría más que
         # ayudar.

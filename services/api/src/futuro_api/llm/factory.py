@@ -10,6 +10,7 @@ qué es una oferta. La dirección de las dependencias se mantiene:
 
 from __future__ import annotations
 
+from futuro_api.assessment import calls
 from futuro_api.config import Settings
 from futuro_api.llm import LlmClient
 from futuro_api.llm.openai_client import OpenAIClient
@@ -19,7 +20,13 @@ from futuro_api.offers import extraction
 
 def build_client(settings: Settings) -> LlmClient:
     if settings.llm_stubbed:
-        return StubClient({extraction.PURPOSE: extraction.canned_draft})
+        return StubClient(
+            {
+                extraction.PURPOSE: extraction.canned_draft,
+                calls.SCORING_PURPOSE: calls.canned_scoring,
+                calls.VARIANT_PURPOSE: calls.canned_variant,
+            }
+        )
     return OpenAIClient(
         api_key=settings.openai_api_key,
         model=settings.openai_model,

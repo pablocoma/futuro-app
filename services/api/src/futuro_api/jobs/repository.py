@@ -152,12 +152,22 @@ async def record_llm_call[T: BaseModel](
 
 
 async def latest_run_for_capture(
-    session: AsyncSession, capture_id: uuid.UUID
+    session: AsyncSession, capture_id: uuid.UUID, *, kind: vocab.JobKind
 ) -> JobRun | None:
+    """El último trabajo de ese tipo sobre esa captura.
+
+    `kind` es obligatorio y no tiene valor por defecto, y eso es lo único
+    que M2 le ha tenido que cambiar a la mitad operativa de M1. Con un solo
+    tipo de trabajo, «el último trabajo de esta oferta» era una pregunta sin
+    ambigüedad; con dos, sin filtrar, un trabajo de scoring en curso haría
+    que la pantalla dijera que la **extracción** está en curso. Obligar a
+    decir de qué tipo, en vez de dejar un valor por defecto, es lo que hace
+    que el tercer tipo de trabajo no reintroduzca el fallo en silencio.
+    """
     return (
         await session.execute(
             sa.select(JobRun)
-            .where(JobRun.capture_id == capture_id)
+            .where(JobRun.capture_id == capture_id, JobRun.kind == kind)
             .order_by(JobRun.queued_at.desc(), JobRun.id.desc())
             .limit(1)
         )
@@ -191,7 +201,7 @@ async def fail_stale_runs(
                 finished_at=sa.func.now(),
                 error=(
                     "el trabajo se quedó sin terminar y se dio por perdido; "
-                    "vuelve a lanzar la extracción"
+                    "vuelve a lanzarlo"
                 ),
             )
             .returning(JobRun.id)
@@ -201,16 +211,19 @@ async def fail_stale_runs(
 
 
 async def latest_runs_for(
-    session: AsyncSession, capture_ids: Sequence[uuid.UUID]
+    session: AsyncSession,
+    capture_ids: Sequence[uuid.UUID],
+    *,
+    kind: vocab.JobKind,
 ) -> dict[uuid.UUID, JobRun]:
-    """El último trabajo de cada captura, en una sola consulta."""
+    """El último trabajo de ese tipo de cada captura, en una sola consulta."""
     if not capture_ids:
         return {}
     rows = (
         (
             await session.execute(
                 sa.select(JobRun)
-                .where(JobRun.capture_id.in_(capture_ids))
+                .where(JobRun.capture_id.in_(capture_ids), JobRun.kind == kind)
                 .distinct(JobRun.capture_id)
                 .order_by(JobRun.capture_id, JobRun.queued_at.desc(), JobRun.id.desc())
             )

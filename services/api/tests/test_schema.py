@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import re
 import uuid
+from decimal import Decimal
 
 import pytest
 import sqlalchemy as sa
@@ -431,3 +432,378 @@ async def test_the_orm_writes_and_reads_the_whole_shape(
     assert loaded.evidence["comp_amount_min"] == {"status": "absent"}
     assert loaded.corrections == []
     assert loaded.extracted_at is not None
+
+
+# ---------------------------------------------------------------------------
+# La capa `assessment`: lo que el esquema tiene que impedir por sí solo
+# ---------------------------------------------------------------------------
+
+
+async def _insert_assessment(
+    connection: AsyncConnection, extraction_id: uuid.UUID, **overrides: object
+) -> uuid.UUID:
+    values: dict[str, object] = {
+        "extraction": extraction_id,
+        "source": "llm",
+        "job_run_id": None,
+        "derived_from_id": None,
+        "version": "1",
+        "sha": "f" * 64,
+        "prompt_version": "test/0",
+        "model": "stub",
+        "value_score": Decimal("3.19"),
+        "coverage": Decimal("0.85"),
+        "band": "medium",
+        "reason": "motivo inventado",
+        "bucket": "realistic_stretch",
+        "note": None,
+        "tier": "standard",
+    }
+    values.update(overrides)
+    result = await connection.execute(
+        sa.text(
+            "INSERT INTO offer_assessments (extraction_id, source, job_run_id, "
+            "derived_from_id, scoring_model_version, scoring_model_sha256, "
+            "prompt_version, model, value_score, coverage, probability_band, "
+            "probability_reason, portfolio_bucket, portfolio_note, effort_tier) "
+            "VALUES (:extraction, :source, :job_run_id, :derived_from_id, "
+            ":version, :sha, :prompt_version, :model, :value_score, :coverage, "
+            ":band, :reason, :bucket, :note, :tier) RETURNING id"
+        ),
+        values,
+    )
+    return result.scalar_one()  # type: ignore[no-any-return]
+
+
+async def test_a_score_without_a_citation_is_rejected_by_the_database(
+    connection: AsyncConnection,
+) -> None:
+    """La regla central del contrato, sostenida abajo y no solo en Python.
+
+    «Una nota sin cita es inválida.» `rules.py` es quien decide qué hacer
+    con ella —dejar la dimensión sin puntuar— y esto es la red de debajo.
+    """
+    capture_id = await _insert_capture(connection)
+    extraction_id = await _insert_extraction(connection, capture_id)
+    assessment_id = await _insert_assessment(connection, extraction_id)
+    with pytest.raises(IntegrityError, match="score_needs_citation"):
+        await connection.execute(
+            sa.text(
+                "INSERT INTO offer_assessment_dimensions (assessment_id, position, "
+                "dimension, weight, score, citation, reason) VALUES "
+                "(:a, 0, 'ahorro', 40, 4, NULL, 'motivo')"
+            ),
+            {"a": assessment_id},
+        )
+
+
+async def test_an_unscored_dimension_has_to_explain_itself(
+    connection: AsyncConnection,
+) -> None:
+    """Sin puntuar y con motivo, o puntuada; nunca ninguna de las dos.
+
+    Es lo que hace que «sin puntuar» sea esta misma fila con la nota vacía
+    y no una lista aparte que pueda contradecir a las notas.
+    """
+    capture_id = await _insert_capture(connection)
+    extraction_id = await _insert_extraction(connection, capture_id)
+    assessment_id = await _insert_assessment(connection, extraction_id)
+    with pytest.raises(IntegrityError, match="unscored_explains_itself"):
+        await connection.execute(
+            sa.text(
+                "INSERT INTO offer_assessment_dimensions (assessment_id, position, "
+                "dimension, weight, score, citation, reason, unscored_reason) "
+                "VALUES (:a, 0, 'ahorro', 40, NULL, NULL, NULL, NULL)"
+            ),
+            {"a": assessment_id},
+        )
+
+
+async def test_a_score_out_of_the_scale_is_rejected(
+    connection: AsyncConnection,
+) -> None:
+    """La escala 0-5 está aquí, y por eso el cargador la comprueba.
+
+    Si `config/scoring_model.yaml` la cambiara sin una migración, las filas
+    se rechazarían en el último momento y el error saldría en el sitio menos
+    útil. El cargador se niega a arrancar antes de llegar aquí.
+    """
+    capture_id = await _insert_capture(connection)
+    extraction_id = await _insert_extraction(connection, capture_id)
+    assessment_id = await _insert_assessment(connection, extraction_id)
+    with pytest.raises(IntegrityError, match="score_in_scale"):
+        await connection.execute(
+            sa.text(
+                "INSERT INTO offer_assessment_dimensions (assessment_id, position, "
+                "dimension, weight, score, citation, reason) VALUES "
+                "(:a, 0, 'ahorro', 40, 9, 'una cita', 'motivo')"
+            ),
+            {"a": assessment_id},
+        )
+
+
+async def test_only_a_decided_gate_carries_a_citation(
+    connection: AsyncConnection,
+) -> None:
+    """Un filtro pendiente no se apoya en nada del anuncio.
+
+    Si algo del anuncio lo resolviera, no estaría pendiente.
+    """
+    capture_id = await _insert_capture(connection)
+    extraction_id = await _insert_extraction(connection, capture_id)
+    assessment_id = await _insert_assessment(connection, extraction_id)
+    with pytest.raises(IntegrityError, match="only_a_decided_gate_cites"):
+        await connection.execute(
+            sa.text(
+                "INSERT INTO offer_assessment_gates (assessment_id, position, gate, "
+                "status, citation, reason) VALUES "
+                "(:a, 0, 'permiso', 'pending', 'una cita', 'motivo')"
+            ),
+            {"a": assessment_id},
+        )
+
+
+async def test_a_missing_portfolio_bucket_has_to_explain_itself(
+    connection: AsyncConnection,
+) -> None:
+    """Un hueco con su motivo hace que se arregle el YAML.
+
+    Un cubo ausente y mudo parece un fallo de la aplicación, y el caso pasa
+    de verdad: `portfolio_assignment` no asigna cubo a `very_low`.
+    """
+    capture_id = await _insert_capture(connection)
+    extraction_id = await _insert_extraction(connection, capture_id)
+    with pytest.raises(IntegrityError, match="missing_bucket_explains_itself"):
+        await _insert_assessment(connection, extraction_id, bucket=None, note=None)
+
+
+async def test_a_recomputed_assessment_cannot_have_a_job(
+    connection: AsyncConnection,
+) -> None:
+    """La invariante que hace comprobable la repuntuación.
+
+    Un recálculo no llama al modelo, así que no tiene trabajo en la cola. Si
+    algún día alguien «recalcula» llamando al LLM, el esquema no le deja
+    guardarlo.
+    """
+    capture_id = await _insert_capture(connection)
+    extraction_id = await _insert_extraction(connection, capture_id)
+    origin = await _insert_assessment(connection, extraction_id)
+    job_id = (
+        await connection.execute(
+            sa.text(
+                "INSERT INTO job_runs (kind, status) "
+                "VALUES ('offer_assessment', 'queued') RETURNING id"
+            )
+        )
+    ).scalar_one()
+    with pytest.raises(IntegrityError, match="recomputed_has_no_job"):
+        await _insert_assessment(
+            connection,
+            extraction_id,
+            source="recomputed",
+            job_run_id=job_id,
+            prompt_version=None,
+            model=None,
+            derived_from_id=origin,
+        )
+
+
+async def test_an_llm_assessment_declares_its_prompt_and_model(
+    connection: AsyncConnection,
+) -> None:
+    capture_id = await _insert_capture(connection)
+    extraction_id = await _insert_extraction(connection, capture_id)
+    with pytest.raises(IntegrityError, match="llm_declares_prompt_and_model"):
+        await _insert_assessment(
+            connection, extraction_id, prompt_version=None, model=None
+        )
+
+
+async def test_a_recomputed_assessment_declares_its_origin(
+    connection: AsyncConnection,
+) -> None:
+    """Para poder recorrer la cadena hasta la que sí llamó al modelo."""
+    capture_id = await _insert_capture(connection)
+    extraction_id = await _insert_extraction(connection, capture_id)
+    with pytest.raises(IntegrityError, match="recomputed_declares_its_origin"):
+        await _insert_assessment(
+            connection,
+            extraction_id,
+            source="recomputed",
+            prompt_version=None,
+            model=None,
+            derived_from_id=None,
+        )
+
+
+async def test_meets_without_an_evidence_ref_is_rejected_in_the_match_table(
+    connection: AsyncConnection,
+) -> None:
+    """La prohibición central, ahora en la tabla que sí rellena estos campos.
+
+    En `offer_requirements` el CHECK existe desde M1 y no se ejercita nunca,
+    porque esas columnas se quedan en NULL para siempre: la tabla es
+    inmutable y el cruce tiene que poder recalcularse.
+    """
+    capture_id = await _insert_capture(connection)
+    extraction_id = await _insert_extraction(connection, capture_id)
+    assessment_id = await _insert_assessment(connection, extraction_id)
+    requirement_id = (
+        await connection.execute(
+            sa.text(
+                "INSERT INTO offer_requirements (extraction_id, position, text, "
+                "source_quote, kind, category) VALUES "
+                "(:e, 1, 'SQL', 'Imprescindible SQL', 'mandatory', 'technology') "
+                "RETURNING id"
+            ),
+            {"e": extraction_id},
+        )
+    ).scalar_one()
+    with pytest.raises(IntegrityError, match="meets_needs_evidence_ref"):
+        await connection.execute(
+            sa.text(
+                "INSERT INTO offer_requirement_matches (assessment_id, "
+                "requirement_id, match, evidence_ref, reason) VALUES "
+                "(:a, :r, 'meets', NULL, 'motivo')"
+            ),
+            {"a": assessment_id, "r": requirement_id},
+        )
+
+
+@pytest.mark.parametrize(
+    ("table", "column"),
+    [
+        ("offer_assessments", "probability_reason"),
+        ("offer_assessment_dimensions", "reason"),
+        ("offer_assessment_gates", "reason"),
+        ("offer_requirement_matches", "reason"),
+        ("offer_variant_recommendations", "reason"),
+    ],
+)
+async def test_the_assessment_layer_is_immutable(
+    connection: AsyncConnection, table: str, column: str
+) -> None:
+    """«Recalculable» no es «editable»: repuntuar inserta, no edita.
+
+    Sin el trigger, alguien arregla una nota en sitio y la promesa que
+    justifica guardar `scoring_model_version` —que dos ofertas puntuadas con
+    modelos distintos se noten— muere en silencio.
+    """
+    capture_id = await _insert_capture(connection)
+    extraction_id = await _insert_extraction(connection, capture_id)
+    assessment_id = await _insert_assessment(connection, extraction_id)
+
+    if table == "offer_assessments":
+        row_id = assessment_id
+    elif table == "offer_assessment_dimensions":
+        row_id = (
+            await connection.execute(
+                sa.text(
+                    "INSERT INTO offer_assessment_dimensions (assessment_id, "
+                    "position, dimension, weight, score, citation, reason) VALUES "
+                    "(:a, 0, 'ahorro', 40, 3, 'una cita', 'motivo') RETURNING id"
+                ),
+                {"a": assessment_id},
+            )
+        ).scalar_one()
+    elif table == "offer_assessment_gates":
+        row_id = (
+            await connection.execute(
+                sa.text(
+                    "INSERT INTO offer_assessment_gates (assessment_id, position, "
+                    "gate, status, citation, reason) VALUES "
+                    "(:a, 0, 'permiso', 'pass', 'una cita', 'motivo') RETURNING id"
+                ),
+                {"a": assessment_id},
+            )
+        ).scalar_one()
+    elif table == "offer_requirement_matches":
+        requirement_id = (
+            await connection.execute(
+                sa.text(
+                    "INSERT INTO offer_requirements (extraction_id, position, text, "
+                    "source_quote, kind, category) VALUES "
+                    "(:e, 1, 'SQL', 'Imprescindible SQL', 'mandatory', "
+                    "'technology') RETURNING id"
+                ),
+                {"e": extraction_id},
+            )
+        ).scalar_one()
+        row_id = (
+            await connection.execute(
+                sa.text(
+                    "INSERT INTO offer_requirement_matches (assessment_id, "
+                    "requirement_id, match, evidence_ref, reason) VALUES "
+                    "(:a, :r, 'partial', NULL, 'motivo') RETURNING id"
+                ),
+                {"a": assessment_id, "r": requirement_id},
+            )
+        ).scalar_one()
+    else:
+        row_id = (
+            await connection.execute(
+                sa.text(
+                    "INSERT INTO offer_variant_recommendations (extraction_id, "
+                    "variant, confidence, reason, variants_guide_sha256, "
+                    "prompt_version, model) VALUES "
+                    "(:e, 'una_variante', 'high', 'motivo', :sha, 'test/0', "
+                    "'stub') RETURNING id"
+                ),
+                {"e": extraction_id, "sha": "e" * 64},
+            )
+        ).scalar_one()
+
+    with pytest.raises(IntegrityError, match="inmutable"):
+        await connection.execute(
+            sa.text(f"UPDATE {table} SET {column} = 'otro' WHERE id = :id"),
+            {"id": row_id},
+        )
+
+
+async def test_deleting_a_capture_takes_its_assessment_too(
+    connection: AsyncConnection,
+) -> None:
+    """Inmutable no es imborrable, y la cascada llega hasta abajo."""
+    capture_id = await _insert_capture(connection)
+    extraction_id = await _insert_extraction(connection, capture_id)
+    assessment_id = await _insert_assessment(connection, extraction_id)
+    await connection.execute(
+        sa.text(
+            "INSERT INTO offer_assessment_dimensions (assessment_id, position, "
+            "dimension, weight, score, citation, reason) VALUES "
+            "(:a, 0, 'ahorro', 40, 3, 'una cita', 'motivo')"
+        ),
+        {"a": assessment_id},
+    )
+    await connection.execute(
+        sa.text("DELETE FROM offer_captures WHERE id = :id"), {"id": capture_id}
+    )
+    remaining = (
+        await connection.execute(
+            sa.text(
+                "SELECT (SELECT count(*) FROM offer_assessments) "
+                "+ (SELECT count(*) FROM offer_assessment_dimensions)"
+            )
+        )
+    ).scalar_one()
+    assert remaining == 0
+
+
+async def test_a_job_produces_at_most_one_assessment(
+    connection: AsyncConnection,
+) -> None:
+    """Igual que con las extracciones en M1: el índice único lo impone."""
+    capture_id = await _insert_capture(connection)
+    extraction_id = await _insert_extraction(connection, capture_id)
+    job_id = (
+        await connection.execute(
+            sa.text(
+                "INSERT INTO job_runs (kind, status) "
+                "VALUES ('offer_assessment', 'running') RETURNING id"
+            )
+        )
+    ).scalar_one()
+    await _insert_assessment(connection, extraction_id, job_run_id=job_id)
+    with pytest.raises(IntegrityError, match="job_run_id"):
+        await _insert_assessment(connection, extraction_id, job_run_id=job_id)
