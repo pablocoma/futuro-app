@@ -97,15 +97,31 @@ function Bar({ dimension }: { dimension: Dimension }) {
     );
   }
 
+  // Un cero **es una nota**, y esa distinción es medio proyecto. Con la
+  // altura proporcional a secas se pintaba una columna vacía,
+  // indistinguible de un hueco: se vio en la primera puntuación con el
+  // modelo de verdad, donde `compensation_upside` sacó un 0 y desaparecía.
+  // El mínimo de dos píxeles le deja una línea de base visible, y el número
+  // se saca fuera de la barra cuando no cabe dentro.
+  const zero = dimension.score === 0;
+
   return (
     <div className="flex h-full flex-col justify-end" style={{ width }}>
+      {zero ? (
+        <span className="pb-0.5 text-center font-mono text-xs text-pos">0</span>
+      ) : null}
       <div
         className="flex items-start justify-center bg-pos/70"
-        style={{ height: `${(dimension.score_share ?? 0) * 100}%` }}
+        style={{
+          height: `${(dimension.score_share ?? 0) * 100}%`,
+          minHeight: "2px",
+        }}
       >
-        <span className="pt-0.5 font-mono text-xs text-bg">
-          {dimension.score}
-        </span>
+        {zero ? null : (
+          <span className="pt-0.5 font-mono text-xs text-bg">
+            {dimension.score}
+          </span>
+        )}
       </div>
     </div>
   );

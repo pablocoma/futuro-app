@@ -59,7 +59,13 @@ test("una oferta pegada se puntúa sola y enseña su composición", async ({
   // «40%, 3, 30%, sin puntuar» celda a celda no dice nada.
   const grafico = page.getByRole("img", { name: /Composición ponderada/ });
   await expect(grafico).toBeVisible();
-  await expect(grafico).toHaveAttribute("aria-label", /peso 40, nota \d de 5/);
+  // De forma y no de contenido, por lo mismo que la etiqueta de más abajo:
+  // `peso 40` era el primer peso del repositorio sintético, y ataba el test
+  // a un repositorio concreto.
+  await expect(grafico).toHaveAttribute(
+    "aria-label",
+    /peso \d+, nota \d de 5/,
+  );
   // Y lo que no se pudo puntuar se dice, en vez de ocultarse.
   await expect(grafico).toHaveAttribute("aria-label", /sin puntuar/);
 
@@ -73,12 +79,19 @@ test("una oferta pegada se puntúa sola y enseña su composición", async ({
   // Los nombres de dimensión salen del repositorio de datos y se pintan
   // humanizados, sin traducir: el vocabulario es del repositorio privado y
   // aquí no se duplica.
-  // Aparece dos veces a propósito: como etiqueta debajo de su barra y como
-  // fila del detalle. Se comprueba la del detalle, que es la que lleva la
-  // nota al lado.
-  await expect(
-    page.getByText("Ahorro estimado", { exact: true }).last(),
-  ).toBeVisible();
+  //
+  // La comprobación es de **forma** y no de contenido, a propósito. La
+  // primera versión afirmaba «Ahorro estimado», que es una dimensión del
+  // repositorio sintético, y eso hacía que `make e2e` dependiera de a qué
+  // repositorio apunte `DATA_REPO_HOST_PATH`: en cuanto se apunta al
+  // privado el test se caía, aunque la aplicación funcionara. Lo que este
+  // test tiene que defender es que el identificador llega humanizado —sin
+  // guiones bajos y con la inicial en mayúscula— y no traducido.
+  const etiqueta = await grafico
+    .locator("xpath=following-sibling::div[1]/div[1]/p[1]")
+    .innerText();
+  expect(etiqueta).toMatch(/^[A-ZÁÉÍÓÚÑ]/);
+  expect(etiqueta).not.toContain("_");
 });
 
 test("los filtros distinguen «sin comprobar» de «no cumple»", async ({
