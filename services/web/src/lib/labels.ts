@@ -104,7 +104,7 @@ export const MATCH_LABELS: Record<string, string> = {
 /**
  * Un identificador del repositorio de datos, legible.
  *
- * `expected_net_savings` → «Expected net savings». No se traduce: el
+ * `career_capital_and_brand` → «Career capital and brand». No se traduce: el
  * vocabulario es del repositorio privado y aquí no se duplica. Humanizar el
  * identificador es feo y no oculta nada, que es el mismo criterio que
  * `labelFor` aplica a un campo sin etiqueta.

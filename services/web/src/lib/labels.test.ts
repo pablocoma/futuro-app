@@ -14,7 +14,9 @@ describe("etiquetas de la puntuación", () => {
     // propósito: viven en `config/scoring_model.yaml` del repositorio
     // privado, y tener aquí un diccionario sería duplicar en un repositorio
     // público el vocabulario del privado. Feo, y no oculta nada.
-    expect(humanise("expected_net_savings")).toBe("Expected net savings");
+    expect(humanise("career_capital_and_brand")).toBe(
+      "Career capital and brand",
+    );
     expect(humanise("ahorro_estimado")).toBe("Ahorro estimado");
   });
 

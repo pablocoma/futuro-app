@@ -214,17 +214,15 @@ excepciones **acotada a esa ruta y a ese patrón**, no desactivar la regla:
 el primer principio del repositorio es que aquí no entran datos personales,
 y ese job es lo único que lo comprueba.
 
-**Dato que hay que llevarse a `Futuro`: M2 multiplica por 2,5 el coste por
-oferta**, de ~$0,035 a ~$0,089 medidos con la tabla de tarifas. El
-presupuesto de `ARCHITECTURE.md` §13 (~1 €/mes) pasa de dar para ~30 ofertas
-al mes a dar para ~12.
+**Dato que hay que llevarse a `Futuro`: M2 multiplica por 2,4 el coste por
+oferta**, de ~$0,029 a ~$0,071 observados en la primera llamada real. El
+presupuesto de `ARCHITECTURE.md` §13 (~1 €/mes) pasa de dar para ~37 ofertas
+al mes a dar para ~15.
 
-**Tres huecos de `config/scoring_model.yaml` que decidir en `Futuro`**, y
-que el código deja como huecos visibles en vez de rellenar:
-`portfolio_assignment` no asigna cubo a `very_low`; no declara orden de
-evaluación y sus reglas se solapan; y el orden declarado de `effort_tier`
-hace que una oferta de valor alto con un filtro pendiente salga `cheap` y
-no `full`. El detalle está en `docs/decisions/fase-1-nucleo.md`.
+Los cuatro huecos de `config/scoring_model.yaml` **están cerrados** en la v2
+del 2026-09-05 y su mitad de código implementada aquí; el detalle está en
+`docs/decisions/fase-1-nucleo.md`. Lo que sigue abierto de ahí es la
+variación del modelo entre llamadas, descrita arriba.
 
 ## Siguiente objetivo principal: Fase 1 — el núcleo de la aplicación
 

@@ -20,7 +20,7 @@ extracciones: repuntuar tras un fallo con la misma versión tiene que poder
 crear fila.
 
 **Las dimensiones y los filtros son tablas hijas, no columnas.** Seis
-columnas tipadas —`score_role_fit`, `score_expected_net_savings`…— serían
+columnas tipadas —`score_role_fit`, `score_career_capital_and_brand`…— serían
 duplicar en el esquema la lista de dimensiones, que vive en
 `config/scoring_model.yaml` y cambia sin pasar por aquí. Tampoco es la EAV
 que M1 descartó: la forma es fija y uniforme, no un vocabulario de campos
