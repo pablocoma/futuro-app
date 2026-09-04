@@ -172,9 +172,23 @@ sanos y `data_repo: ok`, `make e2e` con los 10 tests en verde incluido el
 recorrido entero, el cargador probado contra los dos repositorios —el
 sintético y el privado real—, y el repuntuado ejecutado en el contenedor.
 
+Y el CI de `dev` en verde tras subirlo: los siete jobs, incluidos gitleaks,
+las migraciones sobre Postgres y el E2E sobre el compose.
+
 **Lo único no verificado, y no se puede desde aquí:** una puntuación con el
 modelo de verdad. Todo corre con `LLM_PROVIDER=stub` contra el repositorio
 de datos sintético.
+
+**Aviso para cuando se abra el PR de `dev` a `main`:** el CI de M1
+(`fbed4ce`) se quedó en rojo por gitleaks, con un falso positivo
+`generic-api-key` en `services/web/src/lib/api.test.ts` —casi con seguridad
+la cookie inventada `futuro_session=abc`—. No bloquea hoy porque
+`gitleaks-action` escanea solo los commits del push y ese commit ya pasó,
+pero sigue en el historial y volverá a salir en cualquier escaneo que lo
+incluya. Cuando toque, la salida es un `.gitleaks.toml` con una lista de
+excepciones **acotada a esa ruta y a ese patrón**, no desactivar la regla:
+el primer principio del repositorio es que aquí no entran datos personales,
+y ese job es lo único que lo comprueba.
 
 **Dato que hay que llevarse a `Futuro`: M2 multiplica por 2,5 el coste por
 oferta**, de ~$0,035 a ~$0,089 medidos con la tabla de tarifas. El
