@@ -1,6 +1,8 @@
 # Traspaso a la siguiente sesión
 
-Última actualización: 2026-09-05 (M2 cerrada, estrenada con el modelo real, y al día con el modelo de scoring v2).
+Última actualización: 2026-09-05 (M3 cerrada: Fase 1 completa. Pendiente un
+paso manual y externo antes de que el próximo merge a `main` despliegue de
+verdad — ver «Fase 1 cerrada» más abajo).
 
 Este archivo contiene el estado operativo del proyecto. Las reglas duraderas
 están en `AGENTS.md`; no deben duplicarse aquí.
@@ -233,6 +235,62 @@ del 2026-09-05 y su mitad de código implementada aquí; el detalle está en
 `docs/decisions/fase-1-nucleo.md`. Lo que sigue abierto de ahí es la
 variación del modelo entre llamadas, descrita arriba.
 
+### Fase 1 · M3 — entrega del PDF y dossier mínimo, cerrada el 2026-09-05
+
+Con esto la Fase 1 queda completa. Funciona de punta a punta: con una
+oferta ya puntuada, ver el PDF de cualquiera de las variantes disponibles,
+confirmar una o cambiarla, y que quede su fila propia sin tocar la
+recomendación del modelo. El porqué de cada decisión está en
+`docs/decisions/fase-1-nucleo.md`, no aquí.
+
+- **El clon de solo lectura.** El job `deploy` de `deploy.yml` clona
+  `career-strategy` (el nombre real en GitHub del repositorio que la
+  documentación llama `Futuro`) con una deploy key nueva y de solo
+  lectura —`DATA_REPO_DEPLOY_KEY`, distinta de `DEPLOY_SSH_KEY`— y la
+  copia a `/opt/futuro/data/repo` en la VM por `rsync`. La clave vive y
+  muere en el runner: nunca toca la VM. El refresco va enganchado al
+  deploy —cada push a `main` o cada `workflow_dispatch`—, no por su cuenta,
+  el mismo gesto manual que ya exige `recompute.py` tras un cambio en los
+  datos.
+- **`DATA_REPO_PATH` pasa a ser obligatorio con `ENV=production`.** Era la
+  reversión que M2 ya anticipó. `api` y `worker` montan el mismo
+  `/data/repo` de solo lectura desde `docker-compose.yml`.
+- **Localizar el PDF.** `data_repo.pdf_path()` busca por extensión
+  (`*.pdf`) dentro de la carpeta ya validada de la variante, no por el
+  nombre exacto: el repositorio sintético de los tests usa un prefijo y un
+  idioma distintos del privado real a propósito, y ese es justo el caso
+  que un nombre hardcodeado no habría visto.
+- **El dossier mínimo: tabla `applications`.** Se adopta ya el nombre que
+  reserva `docs/OFFER_DATA_CONTRACT.md` para la candidatura completa,
+  aunque hoy solo tenga `variant`, `cv_sha256` y `confirmed_at`. Cuelga de
+  la captura (no de la extracción ni del assessment), append-only con el
+  mismo trigger que las demás capas, y con una referencia opcional a la
+  recomendación que confirma o descarta.
+- **Dos endpoints nuevos** en `offers/router.py`: `GET
+  /api/offers/{id}/cv` sirve el PDF de cualquier variante disponible (por
+  omisión, la confirmada o si no hay ninguna la recomendada), y `POST
+  /api/offers/{id}/dossier` registra una confirmación nueva sin sobrescribir
+  la anterior.
+- **La pantalla.** La sección pasa a llamarse «Variante de CV»: enseña la
+  recomendación, la confirmación vigente si la hay, y una fila por variante
+  disponible con su enlace de descarga y su botón de confirmar —sin
+  JavaScript propio, mismo patrón que el botón de puntuar—.
+
+Verificado en esta máquina el 2026-09-05: `make check` limpio (22 + 316 +
+17 tests), `make migrate-check` limpio con la migración `0003`, y `make
+e2e` con 12 tests en verde —incluidos los dos nuevos de confirmar y
+descargar—, corridos contra el repositorio privado **real** montado en
+local, no solo el sintético. `data_repo.pdf_path()` además probado a mano
+contra ese mismo repositorio real, de solo lectura.
+
+**Sin verificar, y no se puede desde aquí:** el despliegue en la VM con el
+clon de verdad. Provisionar la deploy key en GitHub (`docs/deployment.md`
+§9) es un paso manual sobre una consola externa, y hasta que exista el
+secreto `DATA_REPO_DEPLOY_KEY` el job `preflight` de `deploy.yml` bloqueará
+cualquier merge a `main` con un mensaje claro, en vez de desplegar a
+medias. **Esto es importante antes del próximo PR a `main`**: sin ese
+secreto, el próximo merge no llega a desplegar nada, ni bueno ni malo.
+
 ## Siguiente objetivo principal: Fase 1 — el núcleo de la aplicación
 
 Según `ARCHITECTURE.md` §14, Fase 1 es exactamente esto y nada más: pegar
@@ -253,10 +311,8 @@ una funcionando de punta a punta.
   2026-09-04 (ver arriba).
 - **M2 — Scoring + recomendación de variante. Cerrada** el 2026-09-04 (ver
   arriba).
-- **M3 — Entrega del PDF + dossier mínimo.** Lectura de solo lectura del
-  repositorio privado para localizar el PDF de la variante; confirmar o
-  cambiar variante; descargar; dossier mínimo en Postgres. Sin estados ni
-  recordatorios (Fase 3). Con esto, Fase 1 queda cerrada.
+- **M3 — Entrega del PDF + dossier mínimo. Cerrada** el 2026-09-05 (ver
+  arriba). Con esto, **Fase 1 queda cerrada**.
 
 ### Cómo se trabaja esta fase
 
@@ -279,15 +335,19 @@ despliega: imágenes arm64 a GHCR, SSH a la VM, `alembic upgrade head`,
 comprobación de salud y rollback al tag anterior si falla.
 
 `/api/health` informa de las cuatro piezas. Hoy responde
-`data_repo: not_configured`, que **no es un fallo**: el clon de solo lectura
-del repositorio privado es precisamente lo que trae M3.
+`data_repo: not_configured`, que **no era un fallo** hasta ahora: era la
+decisión de M2 de no exigirlo. Con M3 ya escrito, `DATA_REPO_PATH` es
+obligatorio con `ENV=production`, así que **la API no arrancará** en el
+próximo deploy hasta que el clon de solo lectura exista de verdad en la VM
+—ver «Fase 1 cerrada» más abajo—.
 
 **Primera oferta real ingerida en producción el 2026-09-05.** La extracción
 funcionó de punta a punta con el modelo real: `gpt-5.6-terra`, 3.892 tokens
 de entrada (3.341 servidos de caché), 1.989 de salida, 15,3 s y **0,0256 $**.
 Es menos de lo que M2 midió en local (~0,029 $) gracias a la caché de
-prompt. La puntuación de esa misma oferta falla, y debe fallar, por lo dicho
-arriba: sin repositorio de datos no hay modelo de scoring.
+prompt. La puntuación de esa misma oferta falló, y debía fallar, por lo
+dicho arriba: sin repositorio de datos no hay modelo de scoring. Con el
+clon de M3 desplegado, ese mismo camino debería puntuar.
 
 ### Cabos sueltos, ninguno bloqueante
 
@@ -307,58 +367,38 @@ arriba: sin repositorio de datos no hay modelo de scoring.
   de DuckDNS y el client secret de Google. Ambas regenerables desde sus
   consolas. Queda como decisión consciente, anotada en `Futuro`.
 
-## Siguiente paso: M3 — entrega del PDF y dossier mínimo
+## Fase 1 cerrada
 
-Con esto, Fase 1 queda cerrada. No espera al deploy, igual que M1 y M2.
+Las cuatro rebanadas —M0, M1, M2 y M3— están hechas y verificadas en esta
+máquina. El detalle de qué se integró y por qué en M3 está en
+`docs/decisions/fase-1-nucleo.md`, no aquí.
 
-### Alcance
+### Lo único que queda, y es manual y externo
 
-- **El clon de solo lectura del repositorio privado.** M2 dejó montada la
-  frontera (`futuro_api/data_repo/`, con `DATA_REPO_PATH` apuntando a un
-  directorio) y el clon es lo único que falta detrás: `git clone` con deploy
-  key, volumen en la VM, y una política de refresco. El código que lee no se
-  toca, y esa es la razón por la que la frontera se montó antes.
-  **Aquí sí hay que tocar `docs/deployment.md`**: la deploy key es una
-  pieza a provisionar a mano, y tiene que ser **de solo lectura y distinta
-  de la de despliegue**, para poder revocar una sin perder la otra. La
-  infraestructura ya existe (ver «Producción»), así que esto se añade a una
-  VM que está corriendo: el clon vive en un volumen y `DATA_REPO_PATH` ya
-  está apuntado en el compose.
-- **Localizar y servir el PDF** de la variante recomendada desde el clon, y
-  poder confirmar o cambiar la variante. La confirmación de Pablo es una
-  fila **suya** en otra tabla, no un `UPDATE` sobre
-  `offer_variant_recommendations`: esa fila dice qué eligió el modelo, y eso
-  no cambia porque alguien decida otra cosa.
-- **Dossier mínimo en Postgres.** Sin estados ni recordatorios, que son
-  Fase 3.
-- **Detalle a cubrir de paso, visto en producción el 2026-09-05:** con
-  `data_repo` sin configurar, la pantalla de la oferta sigue ofreciendo los
-  botones «Puntuar» y «Volver a puntuar», y pulsarlos solo repite el mismo
-  `PermanentFailure`. Deberían estar deshabilitados con el motivo al lado
-  mientras no haya repositorio de datos. Se decidió no arreglarlo por
-  separado porque montar el clon lo hace desaparecer; si M3 cambiara de
-  alcance y el clon se retrasara, esto vuelve a merecer un arreglo propio.
+**Antes del próximo merge de `dev` a `main`:**
 
-  El resto de ese camino **sí** se comportó como debía y conviene no
-  «arreglarlo» por error: el fallo es `PermanentFailure` y no un reintento
-  en bucle, nombra la variable que falta, y la oferta se queda **«sin
-  puntuar»** distinguiéndolo explícitamente de una nota baja. Eso último es
-  la prohibición del contrato de no rellenar un ausente con una estimación.
+1. Crear el par de claves de solo lectura y añadir la pública como *Deploy
+   key* en el repositorio de GitHub `career-strategy` (el que la
+   documentación llama `Futuro`), **sin** marcar "Allow write access".
+2. Añadir la privada como el secreto `DATA_REPO_DEPLOY_KEY` en el
+   Environment `production` de `futuro-app`, junto a los cinco que ya
+   había.
 
-### Lo que M3 hereda ya montado
+Procedimiento completo en `docs/deployment.md` §9. Sin este secreto, el job
+`preflight` de `deploy.yml` bloquea el deploy con un mensaje claro **antes**
+de tocar la VM — no se puede llegar a un despliegue a medias por olvidarlo,
+pero tampoco se puede desplegar nada de `dev` hasta hacerlo, porque
+`DATA_REPO_PATH` ya es obligatorio con `ENV=production` y la API de hoy en
+la VM se quedaría sin poder arrancar la próxima vez que se reinicie si el
+clon no llega a existir.
 
-- La frontera con el repositorio privado y el repo de datos sintético para
-  los tests, con `DATA_REPO_HOST_PATH` para apuntar al de verdad.
-- El vocabulario de variantes sale del disco: solo es elegible una variante
-  que tenga carpeta **y** entrada en `config/cv_variants.yaml`. M3 solo
-  tiene que bajar un nivel más, al PDF.
-- `DATA_REPO_PATH` **no** es obligatorio con `ENV=production`, y eso es una
-  decisión de M2 que M3 tiene que revertir: cuando exista el clon, pasa a la
-  lista de obligatorias de `Settings.check_production_requirements`.
+Una vez provisionada la clave, el primer merge a `main` clona el
+repositorio de datos a `/opt/futuro/data/repo` como parte del mismo deploy
+que ya publica imágenes; no hace falta ningún paso adicional en la VM.
 
-### Al cerrar M3
+## Siguiente objetivo: Fase 2 — perfil editable
 
-Ampliar `docs/decisions/fase-1-nucleo.md`, reescribir este archivo, y con
-ello Fase 1 queda cerrada: la siguiente es la Fase 2 (perfil editable), que
-es la primera que **escribe** en el repositorio privado y necesita la
-mecánica de `pull --rebase`, diff y confirmación de `ARCHITECTURE.md` §5.
+Es la primera fase que **escribe** en el repositorio privado `Futuro` y
+necesita la mecánica de `pull --rebase`, diff y confirmación de
+`ARCHITECTURE.md` §5. Su alcance detallado se troceará en su propia sesión,
+partiendo de `ARCHITECTURE.md` §5 y §14 del repositorio privado.

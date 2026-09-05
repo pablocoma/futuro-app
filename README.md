@@ -47,13 +47,25 @@ sin puntuar, y la pantalla lo enseña como un hueco rayado en vez de
 ocultarlo. La puntuación es recalculable sin volver a llamar al modelo, y hay
 un camino real para repuntuar el histórico recorriendo la base de datos.
 
-**En producción desde el 2026-09-05.** Cada merge a `main` despliega solo:
-imágenes arm64 a GHCR, SSH a la VM de Oracle, migraciones, comprobación de
-salud y rollback al tag anterior si falla. Lo que hay que provisionar a mano
-—y las trampas que tiene— está en `docs/deployment.md`; los valores
-concretos viven en el repositorio privado, nunca aquí.
+M3 (entrega del PDF y dossier mínimo) está cerrada, y con ella **la Fase 1
+entera**: con una oferta ya puntuada, se puede ver el PDF de cualquiera de
+las variantes disponibles —leído de un clon de solo lectura del repositorio
+privado—, confirmar una o cambiarla, y esa confirmación queda en su propia
+fila en Postgres sin tocar la recomendación del modelo.
 
-Siguiente: M3, entrega del PDF y dossier mínimo, que cierra la fase.
+**En producción desde el 2026-09-05.** Cada merge a `main` despliega solo:
+imágenes arm64 a GHCR, SSH a la VM de Oracle, el clon del repositorio de
+datos, migraciones, comprobación de salud y rollback al tag anterior si
+falla. Lo que hay que provisionar a mano —y las trampas que tiene— está en
+`docs/deployment.md`; los valores concretos viven en el repositorio
+privado, nunca aquí.
+
+**Pendiente antes del próximo merge a `main`:** provisionar la deploy key de
+solo lectura del repositorio de datos (`docs/deployment.md` §9); sin ella el
+deploy se bloquea con un mensaje claro, en vez de desplegar a medias.
+
+Siguiente: Fase 2, perfil editable — la primera que escribe en el
+repositorio privado.
 
 ## Desarrollo local
 
@@ -75,9 +87,10 @@ extraer de verdad, `LLM_PROVIDER=openai` con su clave y su modelo.
 tests comprueban constraints y triggers, que no existen en ningún otro
 sitio.
 
-Para puntuar, la aplicación lee el modelo de scoring y la guía de variantes
-de CV del repositorio privado `Futuro`, montado de solo lectura en
-`/data/repo`. Por omisión `DATA_REPO_HOST_PATH` apunta a un repositorio de
+Para puntuar y para servir el PDF de una variante, la aplicación lee el
+modelo de scoring, la guía de variantes de CV y los propios PDF del
+repositorio privado `Futuro`, montado de solo lectura en `/data/repo`. Por
+omisión `DATA_REPO_HOST_PATH` apunta a un repositorio de
 datos **sintético** que vive en este repositorio
 (`services/api/tests/fixtures/data_repo/`): imita la forma del privado, no
 comparte ni un dato con él y describe a una persona que no existe. Con eso,
