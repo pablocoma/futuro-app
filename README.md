@@ -60,10 +60,6 @@ falla. Lo que hay que provisionar a mano —y las trampas que tiene— está en
 `docs/deployment.md`; los valores concretos viven en el repositorio
 privado, nunca aquí.
 
-**Pendiente antes del próximo merge a `main`:** provisionar la deploy key de
-solo lectura del repositorio de datos (`docs/deployment.md` §9); sin ella el
-deploy se bloquea con un mensaje claro, en vez de desplegar a medias.
-
 Siguiente: Fase 2, perfil editable — la primera que escribe en el
 repositorio privado.
 

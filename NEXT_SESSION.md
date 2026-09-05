@@ -1,8 +1,8 @@
 # Traspaso a la siguiente sesión
 
-Última actualización: 2026-09-05 (M3 cerrada: Fase 1 completa. Pendiente un
-paso manual y externo antes de que el próximo merge a `main` despliegue de
-verdad — ver «Fase 1 cerrada» más abajo).
+Última actualización: 2026-09-05 (M3 cerrada, desplegada y verificada:
+`/api/health` en `data_repo: ok` en producción. **Fase 1 completa de punta a
+punta**, no solo en código).
 
 Este archivo contiene el estado operativo del proyecto. Las reglas duraderas
 están en `AGENTS.md`; no deben duplicarse aquí.
@@ -283,13 +283,16 @@ descargar—, corridos contra el repositorio privado **real** montado en
 local, no solo el sintético. `data_repo.pdf_path()` además probado a mano
 contra ese mismo repositorio real, de solo lectura.
 
-**Sin verificar, y no se puede desde aquí:** el despliegue en la VM con el
-clon de verdad. Provisionar la deploy key en GitHub (`docs/deployment.md`
-§9) es un paso manual sobre una consola externa, y hasta que exista el
-secreto `DATA_REPO_DEPLOY_KEY` el job `preflight` de `deploy.yml` bloqueará
-cualquier merge a `main` con un mensaje claro, en vez de desplegar a
-medias. **Esto es importante antes del próximo PR a `main`**: sin ese
-secreto, el próximo merge no llega a desplegar nada, ni bueno ni malo.
+**Desplegado y verificado en producción el mismo 2026-09-05.** La deploy
+key de solo lectura y el secreto `DATA_REPO_DEPLOY_KEY` se provisionaron
+con `gh` (procedimiento en `docs/deployment.md` §9); el primer deploy real
+clonó `main` de `career-strategy` —la rama por omisión del repositorio, un
+árbol antiguo sin `cv/` ni `config/`— en vez de `dev`, donde vive el
+contenido de verdad, y `/api/health` lo dijo con el motivo exacto
+(`data_repo: unreadable`, ficheros ausentes). Se corrigió fijando `--branch
+dev` en el `git clone` de `deploy.yml` (detalle en
+`docs/decisions/fase-1-nucleo.md`) y se volvió a desplegar: `/api/health`
+responde `data_repo: ok` en producción.
 
 ## Siguiente objetivo principal: Fase 1 — el núcleo de la aplicación
 
@@ -367,34 +370,19 @@ clon de M3 desplegado, ese mismo camino debería puntuar.
   de DuckDNS y el client secret de Google. Ambas regenerables desde sus
   consolas. Queda como decisión consciente, anotada en `Futuro`.
 
-## Fase 1 cerrada
+## Fase 1 cerrada, en código y en producción
 
-Las cuatro rebanadas —M0, M1, M2 y M3— están hechas y verificadas en esta
-máquina. El detalle de qué se integró y por qué en M3 está en
-`docs/decisions/fase-1-nucleo.md`, no aquí.
+Las cuatro rebanadas —M0, M1, M2 y M3— están hechas, verificadas en esta
+máquina y desplegadas: `/api/health` responde `data_repo: ok` en
+`https://futuro-pc.duckdns.org`. El detalle de qué se integró y por qué en
+M3 está en `docs/decisions/fase-1-nucleo.md`, no aquí.
 
-### Lo único que queda, y es manual y externo
-
-**Antes del próximo merge de `dev` a `main`:**
-
-1. Crear el par de claves de solo lectura y añadir la pública como *Deploy
-   key* en el repositorio de GitHub `career-strategy` (el que la
-   documentación llama `Futuro`), **sin** marcar "Allow write access".
-2. Añadir la privada como el secreto `DATA_REPO_DEPLOY_KEY` en el
-   Environment `production` de `futuro-app`, junto a los cinco que ya
-   había.
-
-Procedimiento completo en `docs/deployment.md` §9. Sin este secreto, el job
-`preflight` de `deploy.yml` bloquea el deploy con un mensaje claro **antes**
-de tocar la VM — no se puede llegar a un despliegue a medias por olvidarlo,
-pero tampoco se puede desplegar nada de `dev` hasta hacerlo, porque
-`DATA_REPO_PATH` ya es obligatorio con `ENV=production` y la API de hoy en
-la VM se quedaría sin poder arrancar la próxima vez que se reinicie si el
-clon no llega a existir.
-
-Una vez provisionada la clave, el primer merge a `main` clona el
-repositorio de datos a `/opt/futuro/data/repo` como parte del mismo deploy
-que ya publica imágenes; no hace falta ningún paso adicional en la VM.
+La deploy key de solo lectura y el secreto `DATA_REPO_DEPLOY_KEY` ya están
+provisionados (procedimiento en `docs/deployment.md` §9). El primer deploy
+real clonó `main` de `career-strategy` en vez de `dev` —la rama por
+omisión del repositorio no es donde vive el contenido— y quedó corregido
+en `deploy.yml`; el detalle está en `docs/decisions/fase-1-nucleo.md`.
+Nada pendiente de este lado.
 
 ## Siguiente objetivo: Fase 2 — perfil editable
 
