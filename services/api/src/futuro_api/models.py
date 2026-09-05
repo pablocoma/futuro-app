@@ -15,6 +15,7 @@ ORM.
 
 from __future__ import annotations
 
+from futuro_api.applications.models import Application
 from futuro_api.assessment.models import (
     AssessmentDimension,
     AssessmentGate,
@@ -32,6 +33,7 @@ from futuro_api.offers.models import (
 )
 
 __all__ = [
+    "Application",
     "AssessmentDimension",
     "AssessmentGate",
     "Company",

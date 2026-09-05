@@ -66,10 +66,11 @@ def make_production_settings(**overrides: object) -> Settings:
     """Unos ajustes de producción que sí arrancan.
 
     Producción exige más que desarrollo, y la lista crece: credenciales de
-    OAuth, un secreto de sesión propio, HTTPS y, desde M1, un proveedor de
-    LLM real con un modelo de tarifa conocida. Tenerla en un solo sitio
-    evita que cada test que necesita un `ENV=production` válido se rompa
-    cada vez que se añade un requisito nuevo.
+    OAuth, un secreto de sesión propio, HTTPS, un proveedor de LLM real con
+    un modelo de tarifa conocida y, desde M3, el repositorio de datos.
+    Tenerla en un solo sitio evita que cada test que necesita un
+    `ENV=production` válido se rompa cada vez que se añade un requisito
+    nuevo.
     """
     base: dict[str, object] = {
         "env": "production",
@@ -79,6 +80,7 @@ def make_production_settings(**overrides: object) -> Settings:
         "openai_api_key": "sk-inventada",
         "openai_model": "gpt-5.6-terra",
         "redis_url": "redis://redis:6379/0",
+        "data_repo_path": "/data/repo",
     }
     base.update(overrides)
     return make_settings(**base)
@@ -303,6 +305,34 @@ async def api(
         postgres_db=settings.postgres_db,
         postgres_user=settings.postgres_user,
         postgres_password=settings.postgres_password,
+    )
+    queue = FakeQueue()
+    with TestClient(app) as client:
+        app.state.queue = queue
+        yield client, queue
+
+
+@pytest.fixture
+async def api_with_data_repo(
+    sessions: async_sessionmaker[AsyncSession],
+) -> AsyncIterator[tuple[TestClient, FakeQueue]]:
+    """Igual que `api`, pero con el repositorio de datos sintético montado.
+
+    Aparte de `api` y no una variante de esa fixture: la mayoría de los
+    tests de los endpoints no necesitan el repositorio de datos, y
+    construirlo siempre pagaría el coste de cargarlo -y el riesgo de que un
+    cambio en el fixture rompa tests que no tienen nada que ver- sin
+    ninguna ganancia.
+    """
+    settings = _postgres_settings(TEST_DATABASE)
+    app = make_app(
+        dev_auth_bypass=True,
+        postgres_host=settings.postgres_host,
+        postgres_port=settings.postgres_port,
+        postgres_db=settings.postgres_db,
+        postgres_user=settings.postgres_user,
+        postgres_password=settings.postgres_password,
+        data_repo_path=str(DATA_REPO),
     )
     queue = FakeQueue()
     with TestClient(app) as client:

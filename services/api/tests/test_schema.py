@@ -807,3 +807,51 @@ async def test_a_job_produces_at_most_one_assessment(
     await _insert_assessment(connection, extraction_id, job_run_id=job_id)
     with pytest.raises(IntegrityError, match="job_run_id"):
         await _insert_assessment(connection, extraction_id, job_run_id=job_id)
+
+
+# ---------------------------------------------------------------------------
+# El dossier minimo (M3)
+# ---------------------------------------------------------------------------
+
+
+async def _insert_application(
+    connection: AsyncConnection, capture_id: uuid.UUID
+) -> uuid.UUID:
+    result = await connection.execute(
+        sa.text(
+            "INSERT INTO applications (capture_id, variant, cv_sha256) "
+            "VALUES (:capture, 'una_variante', :sha) RETURNING id"
+        ),
+        {"capture": capture_id, "sha": "a" * 64},
+    )
+    return result.scalar_one()  # type: ignore[no-any-return]
+
+
+async def test_the_dossier_is_immutable(connection: AsyncConnection) -> None:
+    """Cambiar de variante es una fila nueva, no un `UPDATE`.
+
+    Mismo motivo que las otras capas: sin el trigger, "confirmó primero X y
+    luego cambió a Y" se convertiría en una sola fila que dice Y, y el
+    historial de qué decidió Pablo y cuándo desaparecería.
+    """
+    capture_id = await _insert_capture(connection)
+    application_id = await _insert_application(connection, capture_id)
+    with pytest.raises(IntegrityError, match="inmutable"):
+        await connection.execute(
+            sa.text("UPDATE applications SET variant = 'otra' WHERE id = :id"),
+            {"id": application_id},
+        )
+
+
+async def test_deleting_a_capture_takes_its_dossier_too(
+    connection: AsyncConnection,
+) -> None:
+    capture_id = await _insert_capture(connection)
+    await _insert_application(connection, capture_id)
+    await connection.execute(
+        sa.text("DELETE FROM offer_captures WHERE id = :id"), {"id": capture_id}
+    )
+    remaining = (
+        await connection.execute(sa.text("SELECT count(*) FROM applications"))
+    ).scalar_one()
+    assert remaining == 0

@@ -204,6 +204,7 @@ def test_the_stub_is_refused_in_production() -> None:
             google_client_secret="secreto",
             allowed_emails="alguien@example.test",
             public_base_url="https://example.test",
+            data_repo_path="/data/repo",
             llm_provider="stub",
         )
 

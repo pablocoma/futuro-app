@@ -665,3 +665,203 @@ async def test_rescoring_keeps_the_previous_assessment_visible(
     body = client.get(f"/api/offers/{capture_id}").json()
     assert len(body["assessment_versions"]) == 2
     assert body["assessment"]["id"] == body["assessment_versions"][0]["id"]
+
+
+# ---------------------------------------------------------------------------
+# El dossier minimo: descargar el PDF y confirmar variante (M3)
+# ---------------------------------------------------------------------------
+
+
+async def test_downloading_without_a_variant_serves_the_recommendation(
+    api_with_data_repo: tuple[TestClient, FakeQueue],
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    """Sin `?variant=`, y sin ninguna confirmada todavía: la del modelo."""
+    client, _ = api_with_data_repo
+    capture_id = await _extracted_and_scored(client, sessions)
+
+    response = client.get(f"/api/offers/{capture_id}/cv")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/pdf"
+    expected = next(
+        (DATA_REPO / "cv" / "variants" / "cartografia_nautica").glob("*.pdf")
+    )
+    assert response.content == expected.read_bytes()
+
+
+async def test_downloading_a_specific_variant(
+    api_with_data_repo: tuple[TestClient, FakeQueue],
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    """Se puede mirar cualquier variante disponible antes de confirmarla."""
+    client, _ = api_with_data_repo
+    capture_id = await _extracted_and_scored(client, sessions)
+
+    response = client.get(
+        f"/api/offers/{capture_id}/cv", params={"variant": "sistemas_gis"}
+    )
+    assert response.status_code == 200
+    expected = next((DATA_REPO / "cv" / "variants" / "sistemas_gis").glob("*.pdf"))
+    assert response.content == expected.read_bytes()
+
+
+async def test_downloading_an_unavailable_variant_is_a_422(
+    api_with_data_repo: tuple[TestClient, FakeQueue],
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    client, _ = api_with_data_repo
+    capture_id = await _extracted_and_scored(client, sessions)
+
+    response = client.get(
+        f"/api/offers/{capture_id}/cv", params={"variant": "no_existe"}
+    )
+    assert response.status_code == 422
+
+
+async def test_downloading_without_any_recommendation_is_a_409(
+    api_with_data_repo: tuple[TestClient, FakeQueue],
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    """Extraída pero sin puntuar: no hay variante que servir sin decir cuál."""
+    client, _ = api_with_data_repo
+    ingested = _ingest(client).json()
+    await _extract(sessions, ingested["job_run_id"])
+
+    response = client.get(f"/api/offers/{ingested['capture_id']}/cv")
+    assert response.status_code == 409
+
+
+def test_downloading_without_the_data_repo_is_a_503(
+    api: tuple[TestClient, FakeQueue],
+) -> None:
+    client, _ = api
+    ingested = _ingest(client).json()
+    response = client.get(f"/api/offers/{ingested['capture_id']}/cv")
+    assert response.status_code == 503
+
+
+def test_downloading_for_an_offer_that_does_not_exist_is_a_404(
+    api_with_data_repo: tuple[TestClient, FakeQueue],
+) -> None:
+    client, _ = api_with_data_repo
+    response = client.get("/api/offers/00000000-0000-0000-0000-000000000000/cv")
+    assert response.status_code == 404
+
+
+async def test_confirming_a_variant_records_the_dossier(
+    api_with_data_repo: tuple[TestClient, FakeQueue],
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    """Confirmar registra el PDF exacto y de qué recomendación partió."""
+    client, _ = api_with_data_repo
+    capture_id = await _extracted_and_scored(client, sessions)
+
+    response = client.post(
+        f"/api/offers/{capture_id}/dossier", json={"variant": "cartografia_nautica"}
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["variant"] == "cartografia_nautica"
+    assert len(body["cv_sha256"]) == 64
+    assert body["recommendation_id"] is not None
+
+    detail = client.get(f"/api/offers/{capture_id}").json()
+    assert detail["application"]["variant"] == "cartografia_nautica"
+
+
+async def test_confirming_a_variant_without_a_recommendation_leaves_it_null(
+    api_with_data_repo: tuple[TestClient, FakeQueue],
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    """Nada impide confirmar sin que exista recomendación: los PDF ya existen."""
+    client, _ = api_with_data_repo
+    ingested = _ingest(client).json()
+    await _extract(sessions, ingested["job_run_id"])
+
+    response = client.post(
+        f"/api/offers/{ingested['capture_id']}/dossier",
+        json={"variant": "sistemas_gis"},
+    )
+    assert response.status_code == 201
+    assert response.json()["recommendation_id"] is None
+
+
+async def test_confirming_an_unavailable_variant_is_a_422(
+    api_with_data_repo: tuple[TestClient, FakeQueue],
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    client, _ = api_with_data_repo
+    capture_id = await _extracted_and_scored(client, sessions)
+    response = client.post(
+        f"/api/offers/{capture_id}/dossier", json={"variant": "no_existe"}
+    )
+    assert response.status_code == 422
+
+
+async def test_changing_the_variant_creates_a_new_row_and_it_becomes_current(
+    api_with_data_repo: tuple[TestClient, FakeQueue],
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    """Nunca sobrescribe: cambiar de variante es una fila nueva."""
+    client, _ = api_with_data_repo
+    capture_id = await _extracted_and_scored(client, sessions)
+
+    client.post(
+        f"/api/offers/{capture_id}/dossier", json={"variant": "cartografia_nautica"}
+    )
+    client.post(f"/api/offers/{capture_id}/dossier", json={"variant": "sistemas_gis"})
+
+    detail = client.get(f"/api/offers/{capture_id}").json()
+    assert detail["application"]["variant"] == "sistemas_gis"
+
+    # Y la descarga sin variante explícita sigue lo confirmado, no lo
+    # recomendado -que sigue siendo "cartografia_nautica"-.
+    download = client.get(f"/api/offers/{capture_id}/cv")
+    expected = next((DATA_REPO / "cv" / "variants" / "sistemas_gis").glob("*.pdf"))
+    assert download.content == expected.read_bytes()
+
+
+def test_confirming_for_an_offer_that_does_not_exist_is_a_404(
+    api_with_data_repo: tuple[TestClient, FakeQueue],
+) -> None:
+    client, _ = api_with_data_repo
+    response = client.post(
+        "/api/offers/00000000-0000-0000-0000-000000000000/dossier",
+        json={"variant": "sistemas_gis"},
+    )
+    assert response.status_code == 404
+
+
+async def test_the_detail_shows_no_application_until_one_is_confirmed(
+    api_with_data_repo: tuple[TestClient, FakeQueue],
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    client, _ = api_with_data_repo
+    capture_id = await _extracted_and_scored(client, sessions)
+    body = client.get(f"/api/offers/{capture_id}").json()
+    assert body["application"] is None
+
+
+def test_the_detail_lists_the_available_variants(
+    api_with_data_repo: tuple[TestClient, FakeQueue],
+) -> None:
+    client, _ = api_with_data_repo
+    capture_id = _ingest(client).json()["capture_id"]
+    body = client.get(f"/api/offers/{capture_id}").json()
+    assert set(body["available_variants"]) == {
+        "topografia_urbana",
+        "sistemas_gis",
+        "cartografia_nautica",
+        "teledeteccion",
+    }
+
+
+def test_the_detail_shows_no_variants_without_the_data_repo(
+    api: tuple[TestClient, FakeQueue],
+) -> None:
+    """Un repositorio de datos ausente no tumba el resto del detalle."""
+    client, _ = api
+    capture_id = _ingest(client).json()["capture_id"]
+    response = client.get(f"/api/offers/{capture_id}")
+    assert response.status_code == 200
+    assert response.json()["available_variants"] == []

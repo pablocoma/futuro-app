@@ -61,16 +61,16 @@ class Settings(BaseSettings):
     redis_url: str = "redis://redis:6379/0"
 
     # Repositorio de datos privado, de solo lectura. Es de donde salen el
-    # modelo de scoring y la guía de variantes de CV: sin él no se puntúa,
-    # pero todo lo demás funciona.
+    # modelo de scoring, la guía de variantes de CV y los PDF que se
+    # descargan: sin él no se puntúa ni se sirve ningún CV, pero todo lo
+    # demás funciona.
     #
-    # Vacío significa «no hay repositorio de datos». **No es obligatorio con
-    # `ENV=production`**, y es una decisión, no un olvido: hasta M3 no
-    # existe el clon de solo lectura, y negarse a arrancar dejaría la
-    # aplicación entera caída por una función que todavía no puede
-    # funcionar. En su lugar, `/api/health` informa de que no está y el
-    # trabajo de scoring falla con el motivo. Cuando M3 traiga el clon, esta
-    # variable pasa a la lista de obligatorias de producción.
+    # Vacío significa «no hay repositorio de datos». Hasta M2 no era
+    # obligatorio con `ENV=production` porque el clon de solo lectura no
+    # existía todavía y negarse a arrancar habría tumbado la aplicación
+    # entera por una función que no podía funcionar. M3 trae el clon, así
+    # que pasa a la lista de obligatorias de abajo: en producción ya no hay
+    # motivo para arrancar sin él.
     data_repo_path: str = ""
 
     # LLM. El valor por defecto es `stub` porque es el que hace que el
@@ -158,6 +158,7 @@ class Settings(BaseSettings):
                 ("GOOGLE_CLIENT_SECRET", self.google_client_secret),
                 ("ALLOWED_EMAILS", self.allowed_emails),
                 ("REDIS_URL", self.redis_url),
+                ("DATA_REPO_PATH", self.data_repo_path),
             )
             if not value
         ]

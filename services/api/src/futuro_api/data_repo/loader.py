@@ -1,9 +1,10 @@
 """Lee el repositorio privado desde un directorio, y solo lee.
 
-Esta es la frontera con el repositorio privado `Futuro`, y es lo único que
-M2 necesita de él. Detrás de esta frontera hay hoy un *bind mount* de solo
-lectura y en M3 habrá un clon de git; el código de arriba no distingue una
-cosa de la otra, porque lo único que sabe es que hay un directorio.
+Esta es la frontera con el repositorio privado `Futuro`. Detrás de esta
+frontera hay, según el entorno, un *bind mount* de solo lectura (local) o un
+clon de git de solo lectura (producción, desde M3); el código de arriba no
+distingue una cosa de la otra, porque lo único que sabe es que hay un
+directorio.
 
 Tres propiedades que no son accidentales:
 
@@ -407,6 +408,30 @@ def _bullets(root: Path) -> tuple[Bullet, ...]:
             "referencia a evidencia dejaría de ser inequívoca"
         )
     return tuple(bullets)
+
+
+def pdf_path(root: Path | str, variant: str) -> Path:
+    """La ruta al PDF de una variante ya sabida disponible.
+
+    Un glob por extensión y no una plantilla de nombre. El nombre real
+    -`Pablo_Coma_CV_<variant>_<language>.pdf`- lleva un `<language>` que
+    decide `Futuro` y que hoy es `en` para las cinco, pero el código no debe
+    darlo por supuesto: el repositorio sintético de los tests usa otro
+    prefijo y otro idioma a propósito, precisamente para que nada aquí se
+    ate a la convención de nombres de uno solo de los dos repositorios.
+
+    Cada carpeta de variante tiene exactamente un PDF -el workflow
+    `build-cvs` borra el contenido de la carpeta antes de copiar el nuevo-,
+    así que cero o más de uno es siempre un repositorio con una forma que no
+    se esperaba, y falla cerrado y ruidoso como el resto de este módulo.
+    """
+    variant_dir = Path(root) / VARIANTS_DIR / variant
+    matches = sorted(variant_dir.glob("*.pdf"))
+    if len(matches) != 1:
+        raise DataRepoError(
+            f"«{variant_dir}» debería tener exactamente un PDF y tiene {len(matches)}"
+        )
+    return matches[0]
 
 
 def load(root: Path | str) -> DataRepo:
