@@ -190,6 +190,21 @@ export type AssessmentVersion = {
   value_score: string | null;
 };
 
+/**
+ * El dossier mínimo: qué variante confirmó Pablo, con qué PDF exacto.
+ *
+ * `null` en la oferta no es un error, es "todavía no ha decidido". Cambiar
+ * de variante crea una fila nueva en la API, así que esto siempre refleja
+ * la última.
+ */
+export type Application = {
+  id: string;
+  variant: string;
+  cv_sha256: string;
+  confirmed_at: string;
+  recommendation_id: string | null;
+};
+
 export type ExtractionStatus =
   | "none"
   | "queued"
@@ -217,6 +232,9 @@ export type Offer = {
   assessment: Assessment | null;
   variant_recommendation: VariantRecommendation | null;
   assessment_versions: AssessmentVersion[];
+  application: Application | null;
+  /** Vacía si el repositorio de datos no está configurado o no se puede leer. */
+  available_variants: string[];
 };
 
 export type OfferSummary = {
@@ -352,4 +370,11 @@ export type AssessResult = {
 
 export function assessOffer(id: string): Promise<PostResult<AssessResult>> {
   return apiPost<AssessResult>(`/api/offers/${id}/assess`);
+}
+
+export function confirmVariant(
+  id: string,
+  variant: string,
+): Promise<PostResult<Application>> {
+  return apiPost<Application>(`/api/offers/${id}/dossier`, { variant });
 }

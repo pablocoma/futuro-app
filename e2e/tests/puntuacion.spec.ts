@@ -113,7 +113,7 @@ test("la variante recomendada se enseña con su motivo", async ({ page }) => {
   await pegarYEsperar(page);
 
   await expect(
-    page.getByRole("heading", { name: "Variante de CV recomendada" }),
+    page.getByRole("heading", { name: "Variante de CV" }),
   ).toBeVisible();
   // El modelo elige entre documentos que ya existen; el motivo es lo que se
   // le enseña a quien decide.

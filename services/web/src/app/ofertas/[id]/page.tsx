@@ -20,7 +20,7 @@ import {
   labelFor,
 } from "@/lib/labels";
 
-import { requestAssessment } from "./actions";
+import { confirmVariant, requestAssessment } from "./actions";
 import { requireUser } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -116,6 +116,8 @@ export default async function Page({
         <Scoring
           assessment={offer.assessment}
           variant={offer.variant_recommendation}
+          application={offer.application}
+          availableVariants={offer.available_variants}
           captureId={offer.capture.id}
           versions={offer.assessment_versions.length}
         />
@@ -285,11 +287,15 @@ export default async function Page({
 function Scoring({
   assessment,
   variant,
+  application,
+  availableVariants,
   captureId,
   versions,
 }: {
   assessment: Assessment;
   variant: Offer["variant_recommendation"];
+  application: Offer["application"];
+  availableVariants: Offer["available_variants"];
   captureId: string;
   versions: number;
 }) {
@@ -425,37 +431,68 @@ function Scoring({
         ))}
       </Section>
 
-      <Section title="Variante de CV recomendada">
-        {variant === null ? (
+      <Section title="Variante de CV">
+        {variant === null && application === null ? (
           <Empty>No hay recomendación para esta lectura del anuncio.</Empty>
         ) : (
-          <div className="space-y-2 px-5 py-4">
-            <div className="flex flex-wrap items-baseline justify-between gap-4">
-              <span className="font-mono text-sm text-acc">
-                {variant.variant}
-              </span>
-              <span className="font-mono text-xs text-ink3">
-                confianza {variant.confidence}
-              </span>
-            </div>
-            <p className="text-sm text-ink2">{variant.reason}</p>
-            {/* El PDF se descarga en M3, que es cuando existe el clon del
-                repositorio privado desde donde localizarlo. Se dice, en vez
-                de dejar un botón que no hace nada. */}
-            <p className="font-mono text-xs text-ink3">
-              El modelo elige entre los documentos que ya existen; no redacta
-              nada. La descarga del PDF llega con M3.
-            </p>
-            {/* Su propia procedencia, y no la del scoring: la elección de
-                variante se hizo con otro prompt y contra otra cosa —la guía
-                de `cv/variants/`—, que además cambia cuando cambia la
-                estrategia de CV. Meterla en el bloque de la puntuación
-                sugeriría que las dos se recalculan juntas, y no: la
-                puntuación se recalcula sin el modelo y esto no. */}
-            <p className="font-mono text-xs text-ink3">
-              {variant.prompt_version} · {variant.model} ·{" "}
-              {new Date(variant.recommended_at).toLocaleString("es-ES")}
-            </p>
+          <div className="space-y-4 px-5 py-4">
+            {variant ? (
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-baseline justify-between gap-4">
+                  <span className="font-mono text-sm text-acc">
+                    recomendada: {variant.variant}
+                  </span>
+                  <span className="font-mono text-xs text-ink3">
+                    confianza {variant.confidence}
+                  </span>
+                </div>
+                <p className="text-sm text-ink2">{variant.reason}</p>
+                {/* El modelo elige entre documentos que ya existen; no
+                    redacta nada. Su propia procedencia, y no la del scoring:
+                    se hizo con otro prompt y contra otra cosa -la guía de
+                    `cv/variants/`-, que cambia cuando cambia la estrategia de
+                    CV y no cuando cambia el modelo de scoring. */}
+                <p className="font-mono text-xs text-ink3">
+                  {variant.prompt_version} · {variant.model} ·{" "}
+                  {new Date(variant.recommended_at).toLocaleString("es-ES")}
+                </p>
+              </div>
+            ) : null}
+
+            {application ? (
+              <p className="rounded border border-pos/30 bg-pos/5 px-3 py-2 font-mono text-xs text-pos">
+                ✓ confirmada: {application.variant} ·{" "}
+                {new Date(application.confirmed_at).toLocaleString("es-ES")}
+              </p>
+            ) : (
+              <p className="font-mono text-xs text-ink3">
+                Todavía no se ha confirmado ninguna variante.
+              </p>
+            )}
+
+            {availableVariants.length > 0 ? (
+              <div>
+                <h3 className="font-mono text-xs uppercase tracking-widest text-ink3">
+                  Confirmar o cambiar
+                </h3>
+                <div className="mt-2 divide-y divide-white/5">
+                  {availableVariants.map((option) => (
+                    <VariantOptionRow
+                      key={option}
+                      captureId={captureId}
+                      variant={option}
+                      isRecommended={variant?.variant === option}
+                      isConfirmed={application?.variant === option}
+                    />
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <p className="font-mono text-xs text-neg">
+                ▲ El repositorio de datos no está disponible: no se puede
+                confirmar ni descargar ningún PDF ahora mismo.
+              </p>
+            )}
           </div>
         )}
       </Section>
@@ -629,6 +666,59 @@ function AssessButton({
   );
 }
 
+
+/**
+ * Una variante disponible: su PDF y, si no es ya la confirmada, un botón
+ * para confirmarla. El enlace de descarga apunta directo a la API -Caddy la
+ * enruta al mismo origen, así que la cookie de sesión viaja sola- y no pasa
+ * por Next: no hay nada que este servidor tenga que hacer con los bytes de
+ * un PDF salvo dejar que el navegador los pida él mismo.
+ */
+function VariantOptionRow({
+  captureId,
+  variant,
+  isRecommended,
+  isConfirmed,
+}: {
+  captureId: string;
+  variant: string;
+  isRecommended: boolean;
+  isConfirmed: boolean;
+}) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 py-2">
+      <span className="font-mono text-sm">
+        {variant}
+        {isRecommended ? (
+          <span className="ml-2 text-xs text-acc">recomendada</span>
+        ) : null}
+        {isConfirmed ? (
+          <span className="ml-2 text-xs text-pos">confirmada</span>
+        ) : null}
+      </span>
+      <div className="flex items-center gap-4">
+        <a
+          href={`/api/offers/${captureId}/cv?variant=${variant}`}
+          className="font-mono text-xs text-ink2 hover:text-acc"
+        >
+          Ver PDF
+        </a>
+        {isConfirmed ? null : (
+          <form action={confirmVariant}>
+            <input type="hidden" name="capture_id" value={captureId} />
+            <input type="hidden" name="variant" value={variant} />
+            <button
+              type="submit"
+              className="rounded border border-acc/40 px-2 py-1 font-mono text-xs text-acc hover:bg-acc/10"
+            >
+              Confirmar
+            </button>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function titleOf(offer: Offer): string | null {
   const title = offer.extraction?.identification.find(
