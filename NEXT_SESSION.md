@@ -282,6 +282,13 @@ comprobación de salud y rollback al tag anterior si falla.
 `data_repo: not_configured`, que **no es un fallo**: el clon de solo lectura
 del repositorio privado es precisamente lo que trae M3.
 
+**Primera oferta real ingerida en producción el 2026-09-05.** La extracción
+funcionó de punta a punta con el modelo real: `gpt-5.6-terra`, 3.892 tokens
+de entrada (3.341 servidos de caché), 1.989 de salida, 15,3 s y **0,0256 $**.
+Es menos de lo que M2 midió en local (~0,029 $) gracias a la caché de
+prompt. La puntuación de esa misma oferta falla, y debe fallar, por lo dicho
+arriba: sin repositorio de datos no hay modelo de scoring.
+
 ### Cabos sueltos, ninguno bloqueante
 
 - **Backup sin montar.** `pg_dump` diario cifrado a Oracle Object Storage con
@@ -311,9 +318,12 @@ Con esto, Fase 1 queda cerrada. No espera al deploy, igual que M1 y M2.
   directorio) y el clon es lo único que falta detrás: `git clone` con deploy
   key, volumen en la VM, y una política de refresco. El código que lee no se
   toca, y esa es la razón por la que la frontera se montó antes.
-  **Aquí sí hay que tocar `docs/deployment.md`** —la deploy key es una pieza
-  a provisionar a mano— así que conviene coordinarlo con la sesión del
-  deploy si sigue abierta.
+  **Aquí sí hay que tocar `docs/deployment.md`**: la deploy key es una
+  pieza a provisionar a mano, y tiene que ser **de solo lectura y distinta
+  de la de despliegue**, para poder revocar una sin perder la otra. La
+  infraestructura ya existe (ver «Producción»), así que esto se añade a una
+  VM que está corriendo: el clon vive en un volumen y `DATA_REPO_PATH` ya
+  está apuntado en el compose.
 - **Localizar y servir el PDF** de la variante recomendada desde el clon, y
   poder confirmar o cambiar la variante. La confirmación de Pablo es una
   fila **suya** en otra tabla, no un `UPDATE` sobre
@@ -321,6 +331,19 @@ Con esto, Fase 1 queda cerrada. No espera al deploy, igual que M1 y M2.
   no cambia porque alguien decida otra cosa.
 - **Dossier mínimo en Postgres.** Sin estados ni recordatorios, que son
   Fase 3.
+- **Detalle a cubrir de paso, visto en producción el 2026-09-05:** con
+  `data_repo` sin configurar, la pantalla de la oferta sigue ofreciendo los
+  botones «Puntuar» y «Volver a puntuar», y pulsarlos solo repite el mismo
+  `PermanentFailure`. Deberían estar deshabilitados con el motivo al lado
+  mientras no haya repositorio de datos. Se decidió no arreglarlo por
+  separado porque montar el clon lo hace desaparecer; si M3 cambiara de
+  alcance y el clon se retrasara, esto vuelve a merecer un arreglo propio.
+
+  El resto de ese camino **sí** se comportó como debía y conviene no
+  «arreglarlo» por error: el fallo es `PermanentFailure` y no un reintento
+  en bucle, nombra la variable que falta, y la oferta se queda **«sin
+  puntuar»** distinguiéndolo explícitamente de una nota baja. Eso último es
+  la prohibición del contrato de no rellenar un ausente con una estimación.
 
 ### Lo que M3 hereda ya montado
 
