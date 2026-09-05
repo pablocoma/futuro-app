@@ -1406,3 +1406,102 @@ probar:
 La conclusión práctica no cambia: repuntuar **llamando al modelo** no es
 reproducible, repuntuar **sin llamarlo** sí, y la capa append-only es lo que
 hace visible la diferencia.
+
+## 2026-09-05 — El despliegue de M0, y lo que costó
+
+M0 quedó cerrado al desplegar por primera vez a la VM de Oracle. El código
+llevaba dos días verificado en local; lo que faltaba era la infraestructura,
+que es trabajo manual sobre consolas externas. El procedimiento y las
+trampas están en `docs/deployment.md`, sin valores concretos; los valores
+viven en `Futuro`. Aquí van solo las decisiones.
+
+**Decisión: `main` protegida con historial lineal y cero aprobaciones
+requeridas.** `AGENTS.md` decía que `main` estaba protegida y no lo estaba.
+Se configuró antes del primer merge, con los siete checks de `ci.yml` como
+obligatorios. Cero aprobaciones porque GitHub no deja aprobar el propio PR y
+exigir una bloquearía todos los merges para siempre. `enforce_admins`
+desactivado a propósito: con él activado, un check colgado por una caída de
+GitHub impediría desplegar un arreglo urgente.
+
+**Consecuencia no prevista: historial lineal obliga a rebase, y el rebase
+reescribe los SHA.** Eso rompió las excepciones de gitleaks, que estaban
+escritas como huellas `commit:fichero:regla:línea`. El deploy se bloqueó
+justo después del primer merge. **Huellas y merge por rebase son
+incompatibles**, y la incompatibilidad la introdujo activar el historial
+lineal media hora antes.
+
+**Decisión: excusar gitleaks por contenido exacto del secreto.** No depende
+de ningún SHA, así que sobrevive a cualquier rebase. Se usa la forma
+singular `[allowlist]` y no `[[allowlists]]` con `condition`/`regexTarget`
+porque esa sintaxis necesita una versión más nueva que la que trae
+`gitleaks-action@v2`.
+
+### Las cuatro trampas de gitleaks, por si vuelven
+
+Costaron cuatro intentos. Las tres primeras son de mecánica de la acción y
+están anotadas en el propio `ci.yml`:
+
+1. **La acción no autodetecta `.gitleaks.toml`.** Pasa su propia `--config`
+   y anula la detección que sí hace el binario. Se corrige con
+   `GITLEAKS_CONFIG`.
+2. **La acción ignora en silencio la sintaxis que no entiende.** Trae una
+   versión más antigua que la de una máquina de desarrollo al día, y no
+   avisa: el log dice que carga la configuración y la aplica a medias. La
+   lección operativa es **probar con la misma versión que usa la acción**,
+   no con la local. Un contenedor con la versión exacta resuelve la duda en
+   un minuto.
+3. **En un push escanea solo los commits nuevos; en un PR, el rango
+   entero.** Un verde en push no demuestra que una excepción funcione.
+4. **El fichero de excepciones también se escanea.** Documentar una
+   excepción transcribiendo el valor que excusa crea un hallazgo nuevo en
+   esa misma línea. Queda el aviso escrito donde toca.
+
+Lo que **no** se hizo, y merece decirse: desactivar la regla, o excluir el
+fichero entero. El job de `fugas de datos` es lo único que comprueba el
+primer principio del repositorio, así que cada excepción se verificó
+además con un commit de prueba que metía una credencial real en el mismo
+fichero, comprobando que seguía saltando.
+
+**Decisión: realinear `dev` con `main` tras el merge por rebase, con
+force-push.** Las dos ramas tenían contenido idéntico y SHA distintos.
+Dejarlo para después habría hecho que el siguiente PR arrastrase la misma
+divergencia. Se usó `--force-with-lease` y se comprobó antes que el diff
+entre ambas era vacío.
+
+## 2026-09-05 — Las pantallas exigían sesión y no la exigían
+
+Al probar el despliegue apareció que sin sesión se podía llegar a
+`/capturar` y pegar una oferta. **No era un agujero de seguridad**: la API
+responde `401` en todas sus rutas, comprobado contra producción, así que
+nada de lo pegado se guardaba ni llegaba al modelo. Era una pantalla que se
+dejaba usar para acabar en un error en inglés al enviar.
+
+Sólo la pantalla de inicio, de M0, comprobaba la sesión. Las tres que
+añadieron M1 y M2 no comprobaban nada.
+
+**Por qué llegó a producción: `DEV_AUTH_BYPASS`.** En local autentica
+siempre, así que el caso «sin sesión» no existe al desarrollar. Producción
+fue el primer sitio donde se dio. Es el precio del bypass, que sigue
+mereciendo la pena —desarrollar sin depender de Google— pero deja este punto
+ciego: **lo que solo se rompe sin sesión no se ve en local**.
+
+**Decisión: `requireUser` pregunta a la API, no mira la cookie.** Dos
+motivos, y el segundo es el que descarta la alternativa: la cookie va
+firmada y desde el frontend no se puede validar, y con el bypass hay sesión
+**sin** cookie, de modo que un guardián basado en su presencia mandaría a la
+pantalla de inicio en local y rompería el E2E entero.
+
+**Decisión: guardián por pantalla, no middleware.** Un middleware de Next
+protegería por omisión también las pantallas futuras, que es el patrón que
+sigue la API. Se descartó porque en el Edge runtime solo puede mirar la
+cookie, y eso choca de frente con el bypass. Como la API es el gate real,
+olvidar el guardián en una pantalla nueva degrada a «error feo», no a fuga.
+
+**Decisión: `make e2e` aborta si `LLM_PROVIDER` no es `stub`.** La suite
+crea ofertas y cada oferta son dos llamadas al modelo. El `.env` local puede
+quedarse apuntando al proveedor real tras una prueba manual —es exactamente
+lo que había pasado, heredado de la primera llamada real de M2— y entonces
+la suite cuesta unos 0,30 $ por ejecución. El fallo es silencioso: los tests
+pasan igual, solo que despacio y facturando. Se descubrió después de gastar
+0,74 $ en tres ejecuciones, visibles en la tabla `llm_calls` porque el
+registro de coste que montó M1 sirvió justo para medirlo.
