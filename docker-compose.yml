@@ -34,6 +34,13 @@ services:
       context: ./services/api
     image: ghcr.io/pablocoma/futuro-api:${IMAGE_TAG:-latest}
     restart: unless-stopped
+    # El repositorio de datos privado, de solo lectura. `DATA_REPO_HOST_PATH`
+    # por omisión apunta a donde el deploy deja el clon en la VM (ver
+    # docs/deployment.md); en local, docker-compose.override.yml sustituye
+    # este volumen entero por el suyo con `!override`, así que esta ruta por
+    # defecto no se usa nunca fuera de producción.
+    volumes:
+      - ${DATA_REPO_HOST_PATH:-/opt/futuro/data/repo}:/data/repo:ro
     environment:
       ENV: ${ENV:-development}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
@@ -50,6 +57,7 @@ services:
       DEV_AUTH_EMAIL: ${DEV_AUTH_EMAIL:-dev@localhost}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
       REDIS_URL: redis://redis:6379/0
+      DATA_REPO_PATH: /data/repo
       LLM_PROVIDER: ${LLM_PROVIDER:-stub}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-}
@@ -103,6 +111,10 @@ services:
     image: ghcr.io/pablocoma/futuro-api:${IMAGE_TAG:-latest}
     restart: unless-stopped
     command: ["arq", "futuro_api.jobs.worker.WorkerSettings"]
+    # Mismo repositorio de datos que `api`, mismo motivo: ver el comentario
+    # de ese servicio.
+    volumes:
+      - ${DATA_REPO_HOST_PATH:-/opt/futuro/data/repo}:/data/repo:ro
     environment:
       ENV: ${ENV:-development}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
@@ -112,6 +124,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-futuro}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-futuro}
       REDIS_URL: redis://redis:6379/0
+      DATA_REPO_PATH: /data/repo
       LLM_PROVIDER: ${LLM_PROVIDER:-stub}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-}

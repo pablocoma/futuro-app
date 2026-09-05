@@ -1,13 +1,13 @@
 name: deploy
 
 # Rama `main`, que solo se toca por merge desde `dev`. Repite las
-# comprobaciones, publica las imágenes en GHCR y despliega en la VM de
-# Oracle.
+# comprobaciones, publica las imágenes en GHCR, refresca el clon de solo
+# lectura del repositorio de datos y despliega en la VM de Oracle. En
+# producción desde el 2026-09-05.
 #
-# Estado: escrito y sin estrenar. La VM, el dominio y el cliente OAuth no
-# existen todavía; el paso de comprobación previa falla con un mensaje claro
-# en vez de dejar un deploy a medias. Lo que hay que provisionar está en
-# docs/deployment.md.
+# El paso de comprobación previa falla con un mensaje claro si falta algún
+# secreto del entorno 'production', en vez de dejar un deploy a medias. Lo
+# que hay que provisionar está en docs/deployment.md.
 #
 # No incluye el aviso por Telegram que menciona ARCHITECTURE.md §11: no hay
 # bot todavía, es Fase 3.
@@ -41,10 +41,11 @@ jobs:
           KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
           DOMAIN: ${{ secrets.APP_DOMAIN }}
+          DATA_REPO_KEY: ${{ secrets.DATA_REPO_DEPLOY_KEY }}
         run: |
           set -euo pipefail
           missing=()
-          for name in HOST USER KEY KNOWN_HOSTS DOMAIN; do
+          for name in HOST USER KEY KNOWN_HOSTS DOMAIN DATA_REPO_KEY; do
             if [ -z "${!name:-}" ]; then missing+=("$name"); fi
           done
           if [ ${#missing[@]} -gt 0 ]; then
@@ -116,6 +117,44 @@ jobs:
           # vive en la VM y no pasa nunca por CI.
           scp -i ~/.ssh/id_ed25519 docker-compose.yml "$SSH_USER@$HOST:/opt/futuro/docker-compose.yml"
           scp -i ~/.ssh/id_ed25519 caddy/Caddyfile "$SSH_USER@$HOST:/opt/futuro/caddy/Caddyfile"
+
+      - name: Preparar la clave de solo lectura del repositorio de datos
+        env:
+          KEY: ${{ secrets.DATA_REPO_DEPLOY_KEY }}
+        run: |
+          set -euo pipefail
+          # Clave dedicada y de solo lectura, distinta de DEPLOY_SSH_KEY: se
+          # puede revocar sin perder el acceso a la VM. Vive solo en este
+          # runner efímero y nunca se copia a la VM.
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/data_repo_ed25519
+          chmod 600 ~/.ssh/data_repo_ed25519
+          ssh-keyscan -t ed25519 github.com > ~/.ssh/known_hosts_data_repo
+
+      - name: Clonar el repositorio de datos (solo lectura)
+        env:
+          GIT_SSH_COMMAND: >-
+            ssh -i ~/.ssh/data_repo_ed25519
+            -o UserKnownHostsFile=~/.ssh/known_hosts_data_repo
+            -o IdentitiesOnly=yes
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/data-repo
+          git clone --depth 1 git@github.com:pablocoma/career-strategy.git /tmp/data-repo
+
+      - name: Copiar el repositorio de datos a la VM
+        env:
+          HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+          SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$HOST" mkdir -p /opt/futuro/data/repo
+          # --delete para que un fichero borrado en Futuro no sobreviva en la
+          # VM; el .git del clon superficial no se copia, no hace falta en
+          # la VM y no es la fuente de verdad de nada allí.
+          rsync -az --delete --exclude=.git \
+            -e "ssh -i ~/.ssh/id_ed25519" \
+            /tmp/data-repo/ "$SSH_USER@$HOST:/opt/futuro/data/repo/"
 
       - name: Desplegar
         env:
