@@ -1,0 +1,35 @@
+# Excepciones de gitleaks, acotadas al máximo.
+#
+# El job de `secrets` en el CI es lo único que comprueba el primer principio
+# del repositorio: que aquí no entran datos personales ni credenciales. Por
+# eso las excepciones se escriben por ruta **y** por contenido exacto, con
+# `condition = "AND"`, y nunca desactivando una regla entera: una regla
+# desactivada deja de mirar todo el repositorio para siempre.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = """
+La URL interna de la API en la red de Compose.
+
+`generic-api-key` marca `http://api:8000` porque lee lo que sigue a `api:`
+como si fuera una credencial. No lo es: `api` es el nombre del servicio en
+`docker-compose.yml` y 8000 su puerto, y esa URL solo se resuelve dentro de
+la red de Docker. Es la base que usa el cliente del frontend para llamar a
+la API desde un Server Component.
+
+La excepción exige que coincidan la ruta y el literal a la vez, así que
+cualquier otro secreto que apareciera en esos mismos ficheros seguiría
+saltando.
+"""
+condition = "AND"
+# Por defecto los `regexes` se comparan contra el secreto extraido, no
+# contra el match completo. Aqui interesa el match, que es donde aparece
+# `api:8000` y lo que hace evidente que es una URL interna y no una clave.
+regexTarget = "match"
+paths = [
+  '''services/web/src/lib/api\.ts$''',
+  '''services/web/src/lib/api\.test\.ts$''',
+]
+regexes = ['''^api:8000/''']
