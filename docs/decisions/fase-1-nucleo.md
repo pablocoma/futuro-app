@@ -1505,3 +1505,220 @@ la suite cuesta unos 0,30 $ por ejecución. El fallo es silencioso: los tests
 pasan igual, solo que despacio y facturando. Se descubrió después de gastar
 0,74 $ en tres ejecuciones, visibles en la tabla `llm_calls` porque el
 registro de coste que montó M1 sirvió justo para medirlo.
+
+## 2026-09-05 — M3, entrega del PDF y dossier mínimo (cierra la Fase 1)
+
+Con esto se cierra el troceo acordado el 2026-09-03. El alcance, según
+`ARCHITECTURE.md` §14: descargar el PDF que CI ya construyó, confirmar o
+cambiar la variante, y un dossier mínimo sin estados ni recordatorios —eso
+es Fase 3—. Cero llamadas al modelo nuevas: el LLM ya eligió y citó en M2,
+aquí solo hay disco y Postgres.
+
+### El clon de solo lectura
+
+**Decisión: la deploy key vive y muere en el runner de GitHub Actions, nunca
+en la VM.** El job `deploy` clona `career-strategy` (superficial, `--depth
+1`) con una clave nueva y de solo lectura —`DATA_REPO_DEPLOY_KEY`, distinta
+de `DEPLOY_SSH_KEY`— y copia el árbol a la VM por `rsync` sobre la misma
+conexión SSH que ya usa para `docker-compose.yml` y `Caddyfile`. La
+alternativa —la clave persistida en la VM con un cron propio haciendo `git
+pull`— se descartó a propósito: con la clave solo en el runner, una VM
+comprometida no puede seguir clonando el repositorio privado por su cuenta.
+Confirmado con Pablo el 2026-09-05.
+
+**Decisión: el refresco va enganchado al deploy, no por su cuenta.** El
+clonado ocurre en el mismo job que publica imágenes: cada push a `main`, o
+cada `workflow_dispatch` manual, que ya existía. Un cambio en el repositorio
+de datos no llega a producción hasta el siguiente merge o hasta que se
+dispare a mano. Es deliberado y simétrico con `assessment/recompute.py`, que
+tampoco corre solo: repuntuar tras un cambio en los datos ya era un gesto
+manual, y refrescar el clon es un gesto de la misma familia. Confirmado con
+Pablo el 2026-09-05, frente a la alternativa de un workflow con su propio
+cron, más fresco pero desacoplado y con una pieza más que mantener.
+
+**Decisión: `/opt/futuro/data/repo` es un directorio plano, no un volumen de
+Docker gestionado.** Mismo patrón que `docker-compose.yml` y
+`caddy/Caddyfile`: el runner lo escribe con `rsync`, Compose lo monta de
+solo lectura. Meter un volumen gestionado habría exigido un contenedor
+aparte solo para volcar el clon dentro, sin ganar nada.
+
+**Decisión: `DATA_REPO_PATH` pasa a la lista de obligatorias con
+`ENV=production`.** Era la reversión que M2 ya anticipó al montar la
+frontera antes que el clon. Hasta hoy no arrancar sin él habría tumbado la
+aplicación entera por una función que no podía funcionar; con el clon ya en
+la VM, seguir arrancando sin él sería el mismo agujero que `AGENTS.md`
+prohíbe para el resto de secretos de producción.
+
+**Desviación del nombre de la documentación:** `Futuro` es como se nombra el
+repositorio privado en toda la documentación, pero el repositorio de GitHub
+se llama en realidad `career-strategy`. `deploy.yml` y `docs/deployment.md`
+usan el nombre real donde hace falta un `git clone`, y anotan la
+equivalencia para que no parezca un error de transcripción.
+
+### Localizar el PDF
+
+**Decisión: `data_repo.pdf_path()` localiza por extensión, no por
+plantilla de nombre.** El nombre real de un PDF es
+`Pablo_Coma_CV_<variante>_<idioma>.pdf`, con `<idioma>` decidido por
+`Futuro` —hoy `en` para las cinco—; el repositorio sintético de los tests
+usa `CV_<variante>_es.pdf`, con otro prefijo y otro idioma, a propósito.
+Si el localizador dependiera del nombre exacto, ese repositorio sintético
+no lo habría destapado nunca. Un glob por `*.pdf` dentro de la carpeta de la
+variante —ya validada como `available` por el cargador de M2— encuentra el
+documento sin dar por supuesto de qué repositorio viene.
+
+**Decisión: cero o más de un PDF es un fallo cerrado y ruidoso, igual que el
+resto de `data_repo`.** El workflow `build-cvs` borra el contenido de la
+carpeta antes de copiar el PDF nuevo, así que exactamente uno es la única
+forma honesta; cualquier otra cosa es un repositorio con una forma que no
+se esperaba, y se dice en vez de elegir un PDF al azar.
+
+**Verificado contra los dos repositorios, sin tocar nada del privado:** el
+cargador sintético con sus cuatro PDF de mentira añadidos a los fixtures
+—antes de M3 no había ninguno—, y una lectura de solo lectura de
+`/Users/valbu/Desktop/Futuro` que confirmó las cinco rutas reales
+(`Pablo_Coma_CV_<variante>_en.pdf`) sin escribir nada.
+
+### El dossier mínimo: la tabla `applications`
+
+**Decisión: se adopta ya el nombre `applications` que reserva
+`docs/OFFER_DATA_CONTRACT.md`**, aunque hoy solo tenga tres columnas de las
+suyas. La alternativa —una tabla `offer_dossiers` propia de M3 y una
+`applications` de verdad en Fase 3— se descartó porque habría exigido
+decidir después si migrar filas o convivir con dos tablas. Con el nombre
+final desde ahora, Fase 3 añade `status`, `channel`, `submitted_at`,
+`follow_up_at`, `outcome` e interacciones con un `ALTER TABLE` aditivo: la
+misma disciplina de migraciones compatibles hacia atrás que ya sigue el
+resto del esquema. Confirmado con Pablo el 2026-09-05, frente a la
+alternativa de una tabla `offer_dossiers` estrecha.
+
+**Decisión: cuelga de `offer_captures`, no de la extracción ni del
+assessment.** Confirmar una variante es un gesto de Pablo sobre *la
+oferta*, el mismo principio que ya aplica `job_runs.capture_id`: si entra
+una reextracción entre medias, lo que cambia es qué recomendación se puede
+confirmar, no la identidad de qué oferta se está preparando.
+
+**Decisión: append-only, con el mismo trigger de inmutabilidad que las
+otras capas.** Cambiar de variante crea una fila nueva y no edita la
+anterior, así que queda el historial de qué confirmó Pablo primero y qué
+decidió después —el mismo motivo que M1 y M2 ya dieron para sus capas—.
+Vigente es la última por `(confirmed_at, id)`.
+
+**Decisión: `recommendation_id` es nullable y `SET NULL` al borrar.** Deja
+constancia de si la confirmación coincide con lo que dijo el modelo o lo
+descarta, pero no lo exige: nada impide confirmar una variante sin que
+exista ninguna recomendación vigente —el trabajo de puntuación pudo fallar,
+o no haberse pedido nunca, y los cinco PDF ya existen igual—.
+
+**Decisión: `cv_sha256` se calcula sobre el PDF servido en el momento de
+confirmar, no se copia de ninguna otra fila.** Es el mismo dato que
+`docs/OFFER_DATA_CONTRACT.md` pide para `applications.cv_sha256` —"lo que
+permite afirmar meses después qué documento exacto se mandó"—, y calcularlo
+del fichero real en vez de fiarse de un campo asegura que dice la verdad
+aunque el PDF de esa variante cambie más tarde por un rebuild de `Futuro`.
+
+### Los dos endpoints
+
+**Decisión: `GET /api/offers/{id}/cv` y `POST /api/offers/{id}/dossier` no
+comparten código de servir bytes.** El primero sirve cualquier variante
+disponible, con o sin confirmar —es lo que permite mirar un PDF antes de
+decidir—; el segundo registra una confirmación y devuelve JSON, nunca
+bytes. Separar «ver» de «decidir» es el mismo principio que ya aplicó M1 a
+extracción y reextracción.
+
+**Decisión: sin `?variant=`, `GET .../cv` sirve lo confirmado y, si no hay
+nada confirmado todavía, lo recomendado.** Es lo que hace que el enlace de
+descarga por omisión siga siendo el correcto después de que Pablo cambie de
+variante, sin que la pantalla tenga que decidir cuál pedir.
+
+**Decisión: sin repositorio de datos, sin recomendación y sin variante
+explícita, cada caso tiene su código y no un 500 genérico.** 503 cuando el
+repositorio de datos no está configurado o no se puede leer —mismo criterio
+que `/api/health`, cargándolo y no mirando si el directorio existe—; 409
+cuando no hay ninguna variante que servir por omisión; 422 cuando la
+variante pedida no está entre las disponibles. Ningún camino deja una
+respuesta ambigua sobre qué falló.
+
+**Decisión: `OfferDetail.available_variants` se carga con manga ancha, sin
+lanzar.** A diferencia de los dos endpoints de arriba, que sí tienen que
+fallar cerrado porque van a *actuar*, el detalle de una oferta solo
+necesita *pintar* la lista de variantes elegibles; un repositorio de datos
+roto no debería tumbar el resto del detalle —la extracción, la puntuación—
+por una lista que ni siquiera se está usando para decidir nada en esa
+petición. Vacía significa "no se puede cambiar de variante ahora", y la
+pantalla lo dice en vez de ocultar el resto.
+
+**Desviación deliberada de "solo el worker depende del repositorio de
+datos"**, que M2 dejó escrito. Servir un PDF y confirmar una variante son
+peticiones síncronas de `api`, así que `api` también necesita el volumen
+montado desde M3; el comentario que lo decía en `data_repo/loader.py` y en
+`docker-compose.override.yml` queda corregido donde estaba escrito.
+
+### La pantalla
+
+**Decisión: sin JavaScript propio, igual que el botón de puntuar.** Cada
+variante disponible es una fila con un enlace `<a>` directo a
+`/api/offers/{id}/cv?variant=...` —Caddy lo enruta al mismo origen, así que
+la cookie de sesión viaja sola— y, si no es ya la confirmada, un
+`<form action={confirmVariant}>` con la misma acción de servidor y
+`revalidatePath` que ya usa `requestAssessment`. La fila de la variante
+confirmada no lleva botón: no hay nada que confirmar dos veces.
+
+**Decisión: la sección se llama "Variante de CV" y no "... recomendada".**
+Ahora enseña tres cosas —la recomendación del modelo, la confirmación de
+Pablo si la hay, y las opciones para cambiarla— y el título viejo solo
+nombraba la primera.
+
+### Desviaciones deliberadas
+
+- **Sin estados, canal, fecha de envío, recordatorio ni interacciones en
+  `applications`.** Están reservados en el nombre de la tabla y en
+  `docs/OFFER_DATA_CONTRACT.md`, pero son Fase 3.
+- **Sin exportar el dossier a Markdown en `Futuro`.** El contrato lo
+  menciona (`opportunities/`), pero también es posterior: hoy no se escribe
+  nada en el repositorio privado desde esta aplicación, ni falta que hace
+  para un dossier mínimo.
+- **El botón «Puntuar» / «Volver a puntuar» sigue sin deshabilitarse cuando
+  `data_repo` no está configurado**, que es el detalle que M2 dejó anotado
+  para cubrir "de paso" en M3. Se decidió no tocarlo: mientras se escribía
+  M3 el repositorio de datos estuvo siempre configurado —local con el
+  sintético o con el real, y en producción desde el clon de este mismo
+  hito—, así que no había forma de verlo ni de probarlo sin desconfigurar
+  algo a propósito. Sigue siendo el `PermanentFailure` correcto si alguien
+  lo pulsa; solo la pantalla del botón se queda como estaba.
+
+### Verificación en esta máquina, 2026-09-05
+
+- `make e2e` en verde antes de tocar código: harness heredado sano.
+- `uv run ruff check .`, `ruff format --check .`, `mypy` y `pytest` (316
+  tests, con Postgres real) limpios en `services/api`.
+- `alembic upgrade head` → `check` → `downgrade base` → `upgrade head` con
+  la migración `0003`, sin deriva.
+- `npm run lint`, `npm run typecheck` y `npm run test` (17 tests) limpios en
+  `services/web`.
+- `make e2e`: 12 tests en verde, incluidos los dos nuevos de
+  `dossier.spec.ts` —confirmar y descargar—, corridos contra el
+  repositorio privado real montado en local (`DATA_REPO_HOST_PATH`
+  apuntando a `/Users/valbu/Desktop/Futuro`), no solo el sintético.
+- `data_repo.pdf_path()` probado a mano contra el repositorio privado real,
+  de solo lectura, confirmando las cinco rutas
+  `Pablo_Coma_CV_<variante>_en.pdf`.
+- La pantalla revisada en una captura real tras confirmar una variante: el
+  aviso de confirmación, la fila confirmada sin botón de confirmar, y las
+  cuatro filas restantes con su enlace y su botón.
+
+**Sin verificar desde aquí, y no se puede:** el despliegue en la VM de
+Oracle con el clon de verdad —el secreto `DATA_REPO_DEPLOY_KEY` y el deploy
+key en GitHub son pasos manuales sobre consolas externas, documentados en
+`docs/deployment.md` §9, y van por su cuenta—.
+
+## Fase 1 cerrada
+
+Con M3, las cuatro rebanadas de la Fase 1 —esqueleto, ingesta y extracción,
+scoring y recomendación de variante, y entrega del PDF con dossier
+mínimo— están completas y verificadas en esta máquina. Lo único pendiente
+de la fase entera es un paso manual y externo: provisionar la deploy key de
+solo lectura en GitHub y confirmar el primer refresco del clon contra la
+VM de producción. La siguiente fase, la 2 (perfil editable), es la primera
+que escribe en el repositorio privado y necesita la mecánica de
+`pull --rebase`, diff y confirmación de `ARCHITECTURE.md` §5.
