@@ -226,3 +226,38 @@ def test_no_variant_with_a_folder_refuses_to_load(repo_copy: Path) -> None:
             shutil.rmtree(folder)
     with pytest.raises(data_repo.DataRepoError, match="carpeta"):
         data_repo.load(repo_copy)
+
+
+# ---------------------------------------------------------------------------
+# El PDF de una variante (M3)
+# ---------------------------------------------------------------------------
+
+
+def test_pdf_path_finds_the_single_pdf_by_extension() -> None:
+    """Un glob por extensión, no una plantilla de nombre.
+
+    El repositorio sintético nombra sus PDF `CV_<variant>_es.pdf` -otro
+    prefijo, otro idioma que el real, `Pablo_Coma_CV_<variant>_en.pdf`- a
+    propósito: si el localizador diera por supuesto el nombre del repositorio
+    privado, este test lo destaparía.
+    """
+    path = data_repo.pdf_path(DATA_REPO, "sistemas_gis")
+    assert path.name == "CV_sistemas_gis_es.pdf"
+    assert path.read_bytes().startswith(b"%PDF-")
+
+
+def test_pdf_path_fails_closed_without_a_pdf(repo_copy: Path) -> None:
+    (
+        repo_copy / loader.VARIANTS_DIR / "sistemas_gis" / "CV_sistemas_gis_es.pdf"
+    ).unlink()
+    with pytest.raises(data_repo.DataRepoError, match="exactamente un PDF"):
+        data_repo.pdf_path(repo_copy, "sistemas_gis")
+
+
+def test_pdf_path_fails_closed_with_more_than_one_pdf(repo_copy: Path) -> None:
+    variant_dir = repo_copy / loader.VARIANTS_DIR / "sistemas_gis"
+    (variant_dir / "CV_sistemas_gis_es.pdf").with_name("otro.pdf").write_bytes(
+        b"%PDF-1.4"
+    )
+    with pytest.raises(data_repo.DataRepoError, match="exactamente un PDF"):
+        data_repo.pdf_path(repo_copy, "sistemas_gis")

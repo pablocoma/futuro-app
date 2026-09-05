@@ -74,11 +74,12 @@ async def health(request: Request, response: Response) -> Health:
         else:
             repo_status = "ok"
 
-    # El repositorio de datos **no** entra en el estado general, y es una
-    # decisión: hasta que M3 traiga el clon no existe en la VM, y marcar el
-    # contenedor como enfermo por eso lo reiniciaría en bucle. Lo único que
-    # no funciona sin él es puntuar, y eso lo dice el trabajo que falla y
-    # esta línea de aquí.
+    # El repositorio de datos **no** entra en el estado general, y sigue
+    # siendo una decisión tras M3: un YAML mal editado a mano en el clon
+    # dejaría el contenedor "enfermo" y Compose lo reiniciaría en bucle sin
+    # que reiniciar arregle nada. Lo único que no funciona sin él es puntuar
+    # y servir el PDF, y eso lo dicen el trabajo que falla y esta línea de
+    # aquí -o el 503 del propio endpoint que sirve el PDF-.
     healthy = database == "ok" and queue == "ok"
     overall: Literal["ok", "degraded"] = "ok" if healthy else "degraded"
     if not healthy:

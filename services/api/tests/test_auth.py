@@ -62,6 +62,16 @@ def test_production_requires_https_base_url() -> None:
         make_production_settings(public_base_url="http://example.test")
 
 
+def test_production_requires_the_data_repo() -> None:
+    """Desde M3 el clon de solo lectura existe, y no arrancar sin él es la
+    misma disciplina que ya aplican OAuth, el secreto de sesión y HTTPS: un
+    esqueleto que levanta sin poder puntuar ni servir un PDF es peor que uno
+    que no levanta.
+    """
+    with pytest.raises(ValidationError, match="DATA_REPO_PATH"):
+        make_production_settings(data_repo_path="")
+
+
 def test_cookie_is_secure_only_in_production() -> None:
     assert make_settings().cookie_secure is False
     assert make_production_settings().cookie_secure is True

@@ -11,10 +11,12 @@ en el OpenAPI, no una aceptación silenciosa de algo que no se sabe procesar.
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 from collections.abc import AsyncIterator
 from datetime import date
-from typing import Annotated, Literal
+from pathlib import Path
+from typing import Annotated, Literal, cast
 
 from arq.connections import ArqRedis
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
@@ -22,12 +24,16 @@ from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from futuro_api import data_repo
+from futuro_api.applications import repository as applications_repo
+from futuro_api.applications import views as applications_views
 from futuro_api.assessment import repository as assessment_repo
 from futuro_api.assessment import views as assessment_views
+from futuro_api.config import Settings
 from futuro_api.jobs import queue as job_queue
 from futuro_api.jobs import repository as jobs_repo
 from futuro_api.jobs import vocabularies as jobs_vocab
-from futuro_api.models import OfferCapture
+from futuro_api.models import OfferCapture, VariantRecommendation
 from futuro_api.offers import repository as offers_repo
 from futuro_api.offers import views
 from futuro_api.offers import vocabularies as vocab
@@ -251,6 +257,178 @@ async def assess(
     )
 
 
+def _loaded_data_repo(request: Request) -> data_repo.DataRepo:
+    """El repositorio de datos cargado, o un 503 con el motivo.
+
+    Mismo criterio que `/api/health`: se comprueba cargando, no mirando si
+    el directorio existe. Sin repositorio de datos no hay PDF que servir ni
+    variante que confirmar, y eso no es un fallo de esta ruta sino del
+    repositorio de datos, así que el código es el mismo que ya usa el
+    trabajo de puntuación para el mismo caso.
+    """
+    settings = cast(Settings, request.app.state.settings)
+    root = settings.data_repo_root
+    if root is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="el repositorio de datos no está configurado",
+        )
+    try:
+        return data_repo.load(root)
+    except data_repo.DataRepoError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)
+        ) from error
+
+
+async def _current_recommendation(
+    session: AsyncSession, capture_id: uuid.UUID
+) -> VariantRecommendation | None:
+    extraction = await offers_repo.current_extraction(session, capture_id)
+    if extraction is None:
+        return None
+    return await assessment_repo.current_variant_recommendation(session, extraction.id)
+
+
+def _available_variants(request: Request) -> tuple[str, ...]:
+    """Igual que `_loaded_data_repo`, pero para pintar y no para actuar.
+
+    Aquí un repositorio de datos ausente o roto no es un error de la
+    petición: es información que la pantalla enseña -"no se puede cambiar de
+    variante, y esto es por qué"- en vez de un 503 que tumbe todo el
+    detalle de la oferta por una pieza que ni siquiera se está usando para
+    puntuar en esta petición.
+    """
+    settings = cast(Settings, request.app.state.settings)
+    root = settings.data_repo_root
+    if root is None:
+        return ()
+    try:
+        return data_repo.load(root).variants.available
+    except data_repo.DataRepoError:
+        return ()
+
+
+def _require_variant(repo: data_repo.DataRepo, variant: str) -> None:
+    if variant not in repo.variants.available:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                f"«{variant}» no es una variante disponible; las que hay "
+                f"son {sorted(repo.variants.available)}"
+            ),
+        )
+
+
+def _pdf_path(repo: data_repo.DataRepo, variant: str) -> Path:
+    """La ruta al PDF, o un 503 si el repositorio cambió bajo los pies.
+
+    `variant` ya pasó por `_require_variant` contra este mismo `repo`, así
+    que solo falla si el disco cambió entre cargarlo y llegar aquí -una
+    ventana estrechísima-. Igual que `_loaded_data_repo`: un problema del
+    repositorio de datos no es un 500 sin motivo.
+    """
+    try:
+        return data_repo.pdf_path(repo.root, variant)
+    except data_repo.DataRepoError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)
+        ) from error
+
+
+@router.get(
+    "/{capture_id}/cv",
+    summary="Descarga el PDF de una variante de CV",
+    response_class=Response,
+)
+async def download_cv(
+    capture_id: uuid.UUID,
+    session: SessionDep,
+    request: Request,
+    variant: str | None = None,
+) -> Response:
+    """Sirve el PDF de una variante, ya construida y validada en CI.
+
+    Sin `variant`, sirve la que Pablo confirmó por última vez o, si todavía
+    no ha confirmado ninguna, la que recomendó el modelo. Se puede pedir
+    cualquier otra de las disponibles: es lo que permite mirar una variante
+    distinta antes de confirmarla.
+    """
+    capture = await session.get(OfferCapture, capture_id)
+    if capture is None:
+        raise HTTPException(status_code=404, detail="esa oferta no existe")
+
+    repo = _loaded_data_repo(request)
+
+    chosen = variant
+    if chosen is None:
+        application = await applications_repo.current_application(session, capture_id)
+        if application is not None:
+            chosen = application.variant
+    if chosen is None:
+        recommendation = await _current_recommendation(session, capture_id)
+        if recommendation is not None:
+            chosen = recommendation.variant
+    if chosen is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "esta oferta no tiene ninguna variante confirmada ni "
+                "recomendada; indica una con ?variant="
+            ),
+        )
+
+    _require_variant(repo, chosen)
+    path = _pdf_path(repo, chosen)
+    return Response(
+        content=path.read_bytes(),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{path.name}"'},
+    )
+
+
+class ConfirmVariantRequest(BaseModel):
+    variant: str
+
+
+@router.post(
+    "/{capture_id}/dossier",
+    status_code=status.HTTP_201_CREATED,
+    summary="Confirma o cambia la variante de CV de esta oferta",
+)
+async def confirm_variant(
+    capture_id: uuid.UUID,
+    payload: ConfirmVariantRequest,
+    session: SessionDep,
+    request: Request,
+) -> applications_views.ApplicationView:
+    """Registra qué variante confirmó Pablo, con el PDF exacto que respalda.
+
+    Nunca sobrescribe una confirmación anterior: crea una fila nueva, igual
+    que reextraer o repuntuar. La fila de `offer_variant_recommendations`
+    que existiera para esta oferta no cambia por esto —dice qué eligió el
+    modelo, no qué decidió Pablo—.
+    """
+    capture = await session.get(OfferCapture, capture_id)
+    if capture is None:
+        raise HTTPException(status_code=404, detail="esa oferta no existe")
+
+    repo = _loaded_data_repo(request)
+    _require_variant(repo, payload.variant)
+    path = _pdf_path(repo, payload.variant)
+
+    recommendation = await _current_recommendation(session, capture_id)
+    application = await applications_repo.create_application(
+        session,
+        capture_id=capture_id,
+        recommendation_id=recommendation.id if recommendation is not None else None,
+        variant=payload.variant,
+        cv_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+    )
+    await session.commit()
+    return applications_views.application_view(application)
+
+
 @router.get("", summary="Lista las ofertas capturadas")
 async def list_offers(
     session: SessionDep,
@@ -309,10 +487,20 @@ class OfferDetail(views.OfferView):
     assessment: assessment_views.AssessmentView | None = None
     variant_recommendation: assessment_views.VariantRecommendationView | None = None
     assessment_versions: list[assessment_views.AssessmentVersionView] = []
+    # El dossier vigente: qué variante confirmó Pablo, si ha confirmado
+    # alguna. `None` no es un error, es "todavía no ha decidido".
+    application: applications_views.ApplicationView | None = None
+    # Las variantes entre las que se puede elegir, tal como las ve el
+    # repositorio de datos ahora mismo. Vacía si no está configurado o no se
+    # puede leer: la pantalla lo distingue enseñando el motivo, no lanzando
+    # un error que tumbe el resto del detalle.
+    available_variants: tuple[str, ...] = ()
 
 
 @router.get("/{capture_id}", summary="Una oferta con lo que se extrajo de ella")
-async def get_offer(capture_id: uuid.UUID, session: SessionDep) -> OfferDetail:
+async def get_offer(
+    capture_id: uuid.UUID, session: SessionDep, request: Request
+) -> OfferDetail:
     capture = await session.get(OfferCapture, capture_id)
     if capture is None:
         raise HTTPException(status_code=404, detail="esa oferta no existe")
@@ -355,6 +543,7 @@ async def get_offer(capture_id: uuid.UUID, session: SessionDep) -> OfferDetail:
     assessment_run = await jobs_repo.latest_run_for_capture(
         session, capture_id, kind=jobs_vocab.JobKind.OFFER_ASSESSMENT
     )
+    application = await applications_repo.current_application(session, capture_id)
     assessment_status = views.status_of(assessment_run, assessment)
     if assessment is not None and extraction is not None:
         assessment_view = assessment_views.assessment_view(
@@ -381,6 +570,12 @@ async def get_offer(capture_id: uuid.UUID, session: SessionDep) -> OfferDetail:
             assessment_views.variant_view(variant) if variant is not None else None
         ),
         assessment_versions=assessment_versions,
+        application=(
+            applications_views.application_view(application)
+            if application is not None
+            else None
+        ),
+        available_variants=_available_variants(request),
         # Solo se enseña el error cuando el trabajo acabó mal: mientras se
         # reintenta, el error del intento anterior confundiría más que
         # ayudar.
