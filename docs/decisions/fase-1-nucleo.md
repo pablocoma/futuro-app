@@ -1707,18 +1707,41 @@ nombraba la primera.
   aviso de confirmación, la fila confirmada sin botón de confirmar, y las
   cuatro filas restantes con su enlace y su botón.
 
-**Sin verificar desde aquí, y no se puede:** el despliegue en la VM de
-Oracle con el clon de verdad —el secreto `DATA_REPO_DEPLOY_KEY` y el deploy
-key en GitHub son pasos manuales sobre consolas externas, documentados en
-`docs/deployment.md` §9, y van por su cuenta—.
+## El primer despliegue de M3, y lo que enseñó
+
+La deploy key de solo lectura se provisionó con `gh` el mismo 2026-09-05:
+par ed25519 nuevo, pública como *deploy key* de `career-strategy` —confirmada
+`read-only` en el listado, no `read-write`— y privada como el secreto
+`DATA_REPO_DEPLOY_KEY` del Environment `production`, sin dejar copia en el
+Mac. El PR de `dev` a `main` fue directo salvo un tropiezo conocido:
+`dev` tenía dos commits con el mismo contenido que `main` pero SHA
+distintos —el rebase-merge anterior ya los había reescrito— y el nuevo
+rebase-merge no podía crear el commit limpio. Es exactamente lo que
+`docs/decisions/fase-1-nucleo.md` ya documentó al cerrar M0: se realineó
+`dev` con `git rebase origin/main` —que descarta solo los commits ya
+aplicados, comprobado con un `diff --stat` vacío antes de tocar nada— y un
+`push --force-with-lease`.
+
+**Hallazgo en el primer deploy real: `git clone` sin `--branch` trae la
+rama por omisión del repositorio, y no es donde vive el contenido.**
+`/api/health` respondió `data_repo: unreadable`, con el motivo exacto —tres
+ficheros ausentes— porque `data_repo.load()` falla cerrado y dice qué
+falta. `career-strategy` declara `main` como rama por omisión en GitHub,
+pero es un árbol antiguo y sin relación (`app/`, `pipeline/`, sin `cv/` ni
+`config/scoring_model.yaml`): el contenido de verdad vive en `dev`, el
+mismo convenio que sigue este propio repositorio. Se corrigió fijando
+`git clone --depth 1 --branch dev` en `deploy.yml`. Ninguna otra pieza
+falló: el mensaje de error señaló la causa exacta sin tener que mirar
+logs, que es precisamente lo que "falla cerrado y con el motivo" está para
+conseguir.
 
 ## Fase 1 cerrada
 
 Con M3, las cuatro rebanadas de la Fase 1 —esqueleto, ingesta y extracción,
 scoring y recomendación de variante, y entrega del PDF con dossier
-mínimo— están completas y verificadas en esta máquina. Lo único pendiente
-de la fase entera es un paso manual y externo: provisionar la deploy key de
-solo lectura en GitHub y confirmar el primer refresco del clon contra la
-VM de producción. La siguiente fase, la 2 (perfil editable), es la primera
-que escribe en el repositorio privado y necesita la mecánica de
-`pull --rebase`, diff y confirmación de `ARCHITECTURE.md` §5.
+mínimo— están completas, desplegadas y verificadas contra producción:
+`/api/health` en `data_repo: ok` tras el segundo deploy, con el clon de
+verdad en `/opt/futuro/data/repo`. La siguiente fase, la 2 (perfil
+editable), es la primera que escribe en el repositorio privado y necesita
+la mecánica de `pull --rebase`, diff y confirmación de `ARCHITECTURE.md`
+§5.

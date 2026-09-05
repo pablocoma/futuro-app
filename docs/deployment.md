@@ -188,14 +188,21 @@ distintas, revocar una no afecta a la otra: es el mismo motivo por el que
 el riesgo que `ARCHITECTURE.md` §15 lista para esta clave en concreto.
 
 **Quién clona, y por qué la clave no toca la VM.** El propio job `deploy` de
-`deploy.yml` clona `career-strategy` (superficial, `--depth 1`) usando esa
-clave, y copia el árbol a la VM por `rsync` sobre la misma conexión SSH que
-ya usa para `docker-compose.yml` y `Caddyfile`. La clave privada vive y
-muere en el runner efímero de GitHub Actions: nunca se escribe en el disco
-de la VM. Es una decisión consciente frente a la alternativa —dejar la
-clave en la VM y que un cron propio hiciera `git pull`—: con la clave solo
-en el runner, una VM comprometida no puede seguir clonando `career-strategy`
-por su cuenta.
+`deploy.yml` clona la rama `dev` de `career-strategy` (superficial, `--depth
+1`) usando esa clave, y copia el árbol a la VM por `rsync` sobre la misma
+conexión SSH que ya usa para `docker-compose.yml` y `Caddyfile`. La clave
+privada vive y muere en el runner efímero de GitHub Actions: nunca se
+escribe en el disco de la VM. Es una decisión consciente frente a la
+alternativa —dejar la clave en la VM y que un cron propio hiciera `git
+pull`—: con la clave solo en el runner, una VM comprometida no puede seguir
+clonando `career-strategy` por su cuenta.
+
+**`dev` explícito, y no la rama por omisión del repositorio.** `main` en
+`career-strategy` es un árbol antiguo y sin relación con `config/`, `cv/` ni
+`docs/`; el contenido de verdad vive en `dev`, el mismo convenio que sigue
+`futuro-app`. Clonar sin `--branch dev` trajo esa rama por omisión en el
+primer intento de despliegue de M3 y dejó `/api/health` en
+`data_repo: unreadable` — se corrigió fijando la rama explícitamente.
 
 **Refresco: enganchado al deploy, no independiente.** El clonado ocurre en
 el mismo job que publica imágenes y despliega: cada push a `main`, o cada
