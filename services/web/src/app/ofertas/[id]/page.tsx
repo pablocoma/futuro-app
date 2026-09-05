@@ -21,6 +21,7 @@ import {
 } from "@/lib/labels";
 
 import { requestAssessment } from "./actions";
+import { requireUser } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
@@ -43,6 +44,7 @@ export default async function Page({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  await requireUser();
   const { id } = await params;
   const offer = await getOffer(id);
   if (offer === null) {

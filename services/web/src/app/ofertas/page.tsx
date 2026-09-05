@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { listOffers } from "@/lib/api";
 import { STATUS_LABELS } from "@/lib/labels";
+import { requireUser } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +14,7 @@ export const dynamic = "force-dynamic";
  * puerta a la pantalla de una oferta.
  */
 export default async function Page() {
+  await requireUser();
   const offers = await listOffers();
 
   return (

@@ -72,4 +72,17 @@ fmt: ## Formatea el código de la API
 	cd services/api && uv run ruff format .
 
 e2e: ## Smoke test de extremo a extremo contra el compose levantado
+	@# La suite crea ofertas, y cada oferta son dos llamadas al modelo. Con
+	@# LLM_PROVIDER=openai eso es dinero real: una ejecucion cuesta unos
+	@# 0,30 $. Se comprueba antes de arrancar porque el .env local puede
+	@# haberse quedado apuntando al proveedor real tras una prueba manual,
+	@# y el fallo es silencioso: los tests corren igual, solo que despacio
+	@# y pagando.
+	@provider=$$(grep -m1 '^LLM_PROVIDER=' .env 2>/dev/null | cut -d= -f2); \
+	if [ "$$provider" != "stub" ]; then \
+		echo "make e2e abortado: LLM_PROVIDER='$$provider' en .env."; \
+		echo "La suite haria llamadas de pago. Ponlo en 'stub' y relanza"; \
+		echo "el stack con 'make up'."; \
+		exit 1; \
+	fi
 	cd e2e && npm ci && npm test
