@@ -32,12 +32,13 @@ jobs:
       - uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          # gitleaks-action NO autodetecta el .gitleaks.toml de la raíz:
-          # hay que señalárselo. Sin esto, en un push pasa —solo escanea los
-          # commits nuevos— pero en un PR escanea el rango entero, aplica la
-          # configuración por defecto y salta con el falso positivo de la URL
-          # interna de la API. Es exactamente lo que bloqueó el PR #1.
-          GITLEAKS_CONFIG: ${{ github.workspace }}/.gitleaks.toml
+          # Las excepciones van en .gitleaksignore, por huella exacta, y ese
+          # fichero sí lo lee la acción sin configuración adicional.
+          #
+          # Aviso para quien lea esto tras un verde en push: en un push la
+          # acción escanea solo los commits nuevos, y en un PR el rango
+          # entero. Un verde en push no demuestra que una excepción
+          # funcione; hay que mirar el check del PR.
 
   cv-builder:
     name: cv_builder
