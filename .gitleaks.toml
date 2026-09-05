@@ -1,0 +1,35 @@
+# Excepciones de gitleaks.
+#
+# Se excusan por CONTENIDO EXACTO del secreto detectado, no por huella
+# (`commit:fichero:regla:linea`). El motivo es que `main` esta protegida con
+# historial lineal, asi que cada merge es un rebase y los SHA cambian: una
+# huella calculada en `dev` deja de coincidir en `main` y el deploy se
+# bloquea. Ya paso una vez.
+#
+# Tampoco se desactiva la regla ni se excluye el fichero entero: el job de
+# `fugas de datos` es lo unico que comprueba el primer principio del
+# repositorio, y una regla desactivada deja de mirar para siempre.
+#
+# Se usa la forma singular `[allowlist]` a proposito: `[[allowlists]]` con
+# `condition`/`regexTarget` necesita una version mas nueva que la 8.24.3 que
+# trae gitleaks-action@v2, y alli se ignora en silencio.
+#
+# CUIDADO al documentar aqui: este fichero tambien se escanea. No transcribas
+# el valor que estas excusando o lo convertiras en un hallazgo nuevo.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = """
+La ruta que sigue al puerto interno del servicio `api` en la red de Compose.
+
+`generic-api-key` interpreta lo que va detras de los dos puntos del host
+como si fuera una credencial. No lo es: es el nombre del servicio en
+docker-compose.yml con su puerto y una ruta de la propia API, y solo
+resuelve dentro de la red de Docker. Aparece en el cliente del frontend y en
+su test.
+"""
+regexes = [
+  '''^8000/api/offers/ingest$''',
+]
