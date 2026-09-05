@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
-import { assessOffer } from "@/lib/api";
+import { assessOffer, confirmVariant as confirmVariantCall } from "@/lib/api";
 
 /**
  * Pide puntuar una oferta otra vez.
@@ -31,5 +31,24 @@ export async function requestAssessment(formData: FormData): Promise<void> {
     return;
   }
   await assessOffer(id);
+  revalidatePath(`/ofertas/${id}`);
+}
+
+/**
+ * Confirma o cambia la variante de CV de una oferta.
+ *
+ * Igual patrón que `requestAssessment` y por el mismo motivo: acción de
+ * servidor, sin `fetch` desde el navegador, con `revalidatePath` para que
+ * la vuelta ya enseñe el dossier confirmado. Nunca sobrescribe una
+ * confirmación anterior -eso lo decide la API creando una fila nueva-, así
+ * que esto solo necesita pedirle a la API que lo haga y refrescar.
+ */
+export async function confirmVariant(formData: FormData): Promise<void> {
+  const id = String(formData.get("capture_id") ?? "");
+  const variant = String(formData.get("variant") ?? "");
+  if (!id || !variant) {
+    return;
+  }
+  await confirmVariantCall(id, variant);
   revalidatePath(`/ofertas/${id}`);
 }
