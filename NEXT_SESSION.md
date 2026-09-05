@@ -40,7 +40,7 @@ concreta.
 El porqué de cada decisión de implementación de esta mitad está en
 `docs/decisions/fase-0.5-workflow-de-cvs.md`, no aquí.
 
-### Fase 1 · M0 — esqueleto, construido y verificado en local
+### Fase 1 · M0 — esqueleto, cerrada el 2026-09-05
 
 Componentes nuevos, cada uno con su harness desde su primer commit:
 
@@ -72,21 +72,29 @@ camino degradado con `postgres` parado, `alembic upgrade head` como no-op
 válido, y los 3 tests E2E en verde. El detalle de qué se decidió y por qué
 está en `docs/decisions/fase-1-nucleo.md`.
 
-**Falta el deploy real, y se está haciendo en otra sesión.**
-`.github/workflows/deploy.yml` está escrito —imágenes a GHCR, deploy por
-SSH, `alembic upgrade head`, comprobación de salud y rollback al tag
-anterior— pero **sin estrenar**: la VM de Oracle, el dominio y el cliente
-OAuth de Google no existían al escribir esto. Su paso de comprobación previa
-falla con un mensaje claro mientras falten los secretos, en vez de dejar un
-deploy a medias.
+**Desplegado el 2026-09-05 en `https://futuro-pc.duckdns.org`.** M0 queda
+cerrado: era lo único que le faltaba.
 
-La provisión es trabajo manual sobre consolas externas (Oracle Cloud, DNS,
-Google Cloud, Settings de GitHub), no cambios en este repositorio: la lista
-está en `docs/deployment.md`. Se acordó el 2026-09-03 sacarla a su propia
-sesión, en paralelo, precisamente porque **no bloquea nada de código**.
+Infraestructura, toda provisionada ese día: VM Ampere en Madrid (1 OCPU /
+6 GB), VCN con subred pública e internet gateway, puertos 22/80/443 abiertos
+en la security list **y** en el `iptables` de la VM, Docker con Compose,
+dominio DuckDNS, cliente OAuth de Google, `/opt/futuro/.env` y los cinco
+secretos del Environment `production`. Los valores concretos están en
+`docs/INFRASTRUCTURE.md` del repositorio privado `Futuro`, nunca aquí.
 
-Cuando ese deploy corra en verde, lo único que cambia aquí es este bloque:
-M0 queda cerrado y no hay que retocar código.
+Comprobado contra producción: certificado de Let's Encrypt válido —el reto
+HTTP-01 confirma que el puerto 80 llega—, `/api/health` en `ok` con base de
+datos y cola, migraciones aplicadas sobre un Postgres vacío, la API cerrada
+por omisión (`401` sin sesión), redirección de HTTP a HTTPS, y el login con
+Google funcionando de punta a punta.
+
+`main` quedó protegida ese mismo día: PR obligatorio, los siete checks de
+`ci.yml` como obligatorios, historial lineal, sin force-push ni borrado.
+`enforce_admins` está **desactivado** a propósito, para poder desbloquear un
+despliegue urgente si un check se rompiera por causas ajenas.
+
+El porqué de las decisiones de despliegue —y las cuatro trampas que costaron
+tiempo— está en `docs/decisions/fase-1-nucleo.md` y en `docs/deployment.md`.
 
 ### Fase 1 · M1 — ingesta y extracción, cerrada el 2026-09-04
 
@@ -256,12 +264,41 @@ una funcionando de punta a punta.
 - No se escribe nada en el repositorio privado `Futuro` desde aquí: solo se
   lee, y solo cuando haya que consultar contrato o diseño.
 - Las rebanadas de código (M1 → M3) van en serie: cada una construye sobre
-  la anterior. La provisión de infraestructura de M0 es lo único que corre
-  en paralelo, porque no toca código.
+  la anterior.
+- Desde el 2026-09-05 hay producción: `main` está protegida y cada merge
+  despliega. Un PR a `main` no es un tramite, es un despliegue.
 - `api` y `web` son componentes nuevos: su harness (lint, tipos, tests) se
   configura como parte de su bootstrap, no después — regla de `AGENTS.md`.
 - Al cerrar cada rebanada, actualizar este archivo con el estado comprobado y
   ampliar `docs/decisions/fase-1-*.md` con qué se integró y por qué.
+
+## Producción
+
+`https://futuro-pc.duckdns.org`, desde el 2026-09-05. Cada merge a `main`
+despliega: imágenes arm64 a GHCR, SSH a la VM, `alembic upgrade head`,
+comprobación de salud y rollback al tag anterior si falla.
+
+`/api/health` informa de las cuatro piezas. Hoy responde
+`data_repo: not_configured`, que **no es un fallo**: el clon de solo lectura
+del repositorio privado es precisamente lo que trae M3.
+
+### Cabos sueltos, ninguno bloqueante
+
+- **Backup sin montar.** `pg_dump` diario cifrado a Oracle Object Storage con
+  retención de 30 días, según `ARCHITECTURE.md` §12. Hoy no hay copia de la
+  base de datos de producción. Lo que hay ahí es recuperable —ofertas
+  reingestables— pero eso deja de ser cierto en cuanto se acumulen
+  candidaturas.
+- **Aviso por Telegram del deploy**, que menciona `ARCHITECTURE.md` §11:
+  fuera hasta la Fase 3, cuando haya bot.
+- **`enforce_admins` desactivado** en la protección de `main`. Deliberado
+  mientras el proyecto se asienta; activarlo es un `gh api` de una línea.
+- **La retención de ~93 EUR** de la tarjeta al pasar la cuenta de Oracle a
+  Pay As You Go debe desaparecer sola del extracto. Si a los siete días
+  sigue como cargo firme, hay que reclamar.
+- **Dos credenciales pasaron por una conversación de Claude Code**: el token
+  de DuckDNS y el client secret de Google. Ambas regenerables desde sus
+  consolas. Queda como decisión consciente, anotada en `Futuro`.
 
 ## Siguiente paso: M3 — entrega del PDF y dossier mínimo
 

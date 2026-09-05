@@ -23,12 +23,9 @@ clasificar con LLM → scoring → recomendar variante → descargar el PDF que 
 construyó. Se entrega en cuatro rebanadas verticales (M0 a M3); troceo y
 estado en `NEXT_SESSION.md`.
 
-M0 (esqueleto) está construido y verificado en local: Compose con `caddy`,
-`api` (FastAPI + uv), `web` (Next.js 16) y `postgres`, `GET /api/health` con
-su página, OAuth de Google con allowlist de un email, CI en `dev` y el
-workflow de deploy. El deploy a la VM de Oracle está escrito y sin estrenar:
-la VM, el dominio y el cliente OAuth se provisionan a mano siguiendo
-`docs/deployment.md`.
+M0 (esqueleto) está cerrada: Compose con `caddy`, `api` (FastAPI + uv), `web`
+(Next.js 16) y `postgres`, la API cerrada por omisión, OAuth de Google con
+allowlist de un email, y CI en `dev`.
 
 M1 (ingesta y extracción) está cerrada: pegar el texto de una oferta,
 extraerla con el LLM en segundo plano y ver lo extraído con la evidencia de
@@ -50,7 +47,13 @@ sin puntuar, y la pantalla lo enseña como un hueco rayado en vez de
 ocultarlo. La puntuación es recalculable sin volver a llamar al modelo, y hay
 un camino real para repuntuar el histórico recorriendo la base de datos.
 
-Siguiente: M3, entrega del PDF y dossier mínimo.
+**En producción desde el 2026-09-05.** Cada merge a `main` despliega solo:
+imágenes arm64 a GHCR, SSH a la VM de Oracle, migraciones, comprobación de
+salud y rollback al tag anterior si falla. Lo que hay que provisionar a mano
+—y las trampas que tiene— está en `docs/deployment.md`; los valores
+concretos viven en el repositorio privado, nunca aquí.
+
+Siguiente: M3, entrega del PDF y dossier mínimo, que cierra la fase.
 
 ## Desarrollo local
 
