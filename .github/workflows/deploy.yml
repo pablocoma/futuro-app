@@ -140,7 +140,12 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf /tmp/data-repo
-          git clone --depth 1 git@github.com:pablocoma/career-strategy.git /tmp/data-repo
+          # `dev` y no la rama por omisión del repositorio (`main`, un árbol
+          # antiguo y sin relación): el contenido de verdad -config/, cv/,
+          # docs/- vive en `dev`, el mismo convenio que sigue este propio
+          # repositorio.
+          git clone --depth 1 --branch dev \
+            git@github.com:pablocoma/career-strategy.git /tmp/data-repo
 
       - name: Copiar el repositorio de datos a la VM
         env:
