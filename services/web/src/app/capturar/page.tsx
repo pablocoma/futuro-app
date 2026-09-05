@@ -1,5 +1,7 @@
 import Link from "next/link";
 
+import { requireUser } from "@/lib/session";
+
 import { CaptureForm } from "./CaptureForm";
 
 export const dynamic = "force-dynamic";
@@ -12,7 +14,9 @@ export const dynamic = "force-dynamic";
  * que enseñar; de momento la espera se ve en la pantalla de la oferta, que
  * se refresca sola mientras el worker trabaja.
  */
-export default function Page() {
+export default async function Page() {
+  await requireUser();
+
   return (
     <main className="mx-auto max-w-3xl space-y-8 px-6 py-12">
       <header className="space-y-2">
