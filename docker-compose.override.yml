@@ -13,10 +13,10 @@
 # repositorio privado delante ni gastar nada. Apuntarlo al de verdad es una
 # línea en `.env`.
 #
-# Solo aquí y no en `docker-compose.yml`: en producción ese directorio lo
-# pondrá el clon de solo lectura, que es M3, y montarlo antes dejaría un
-# volumen vacío diciendo «no se puede leer» donde la verdad es «todavía no
-# existe».
+# `DATA_REPO_PATH` en sí (la ruta *dentro* del contenedor) ya la fija
+# `docker-compose.yml` para los dos entornos por igual; aquí solo cambia
+# `DATA_REPO_HOST_PATH` (la ruta *fuera*, en el Mac), que en producción
+# apunta al clon que deja el deploy (ver docs/deployment.md).
 
 services:
   caddy:
@@ -37,9 +37,9 @@ services:
       - --reload
       - --reload-dir
       - /app/src
-    # `!override` y no añadir: la lista base está vacía hoy, pero cuando M3
-    # monte el clon en producción esta tendría que reemplazarla y no
-    # sumarse, o habría dos montajes peleándose por `/data/repo`.
+    # `!override` y no añadir: `docker-compose.yml` ya monta un
+    # `/data/repo` propio (el clon de producción), y sumarse dejaría dos
+    # montajes peleándose por la misma ruta dentro del contenedor.
     volumes: !override
       # Solo el código: .venv se queda la del contenedor, que es la que
       # coincide con uv.lock para linux/arm64.
@@ -49,7 +49,6 @@ services:
     environment:
       ENV: development
       LOG_LEVEL: DEBUG
-      DATA_REPO_PATH: /data/repo
     ports:
       - "8000:8000"
 
@@ -84,7 +83,6 @@ services:
     environment:
       ENV: development
       LOG_LEVEL: DEBUG
-      DATA_REPO_PATH: /data/repo
 
   postgres:
     ports:

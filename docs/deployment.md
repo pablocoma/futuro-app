@@ -157,6 +157,7 @@ según `ARCHITECTURE.md` §11):
 | `DEPLOY_SSH_KEY` | Clave privada dedicada al deploy, revocable |
 | `DEPLOY_SSH_KNOWN_HOSTS` | Salida de `ssh-keyscan <host>` |
 | `APP_DOMAIN` | El dominio, para la comprobación de salud |
+| `DATA_REPO_DEPLOY_KEY` | Clave privada de solo lectura del repositorio de datos (ver §9) |
 
 `DEPLOY_SSH_KNOWN_HOSTS` no es opcional: sin fijar la huella, el deploy
 confiaría en el primer servidor que respondiese.
@@ -168,6 +169,54 @@ administración, para poder revocarla sin perder el acceso a la VM.
 
 `pg_dump` diario cifrado a Oracle Object Storage (10 GB gratis), retención
 de 30 días. El perfil ya está respaldado por vivir en git.
+
+## 9. El repositorio de datos privado (M3)
+
+`api` y `worker` leen el repositorio privado `Futuro` (el repositorio de
+GitHub se llama en realidad `career-strategy`; `Futuro` es el nombre que usa
+la documentación) de solo lectura, desde `/opt/futuro/data/repo`. Es de
+donde salen el modelo de scoring, la guía de variantes y los PDF que se
+descargan.
+
+**La deploy key es de solo lectura y distinta de `DEPLOY_SSH_KEY`.** En
+GitHub, sobre el repositorio `career-strategy`: *Settings → Deploy keys →
+Add deploy key*, **sin** marcar "Allow write access". La privada entra como
+el secreto `DATA_REPO_DEPLOY_KEY` del Environment `production` de
+`futuro-app`, junto a los demás secretos de despliegue. Al ser dos claves
+distintas, revocar una no afecta a la otra: es el mismo motivo por el que
+`DEPLOY_SSH_KEY` ya está separada de la clave personal de administración, y
+el riesgo que `ARCHITECTURE.md` §15 lista para esta clave en concreto.
+
+**Quién clona, y por qué la clave no toca la VM.** El propio job `deploy` de
+`deploy.yml` clona `career-strategy` (superficial, `--depth 1`) usando esa
+clave, y copia el árbol a la VM por `rsync` sobre la misma conexión SSH que
+ya usa para `docker-compose.yml` y `Caddyfile`. La clave privada vive y
+muere en el runner efímero de GitHub Actions: nunca se escribe en el disco
+de la VM. Es una decisión consciente frente a la alternativa —dejar la
+clave en la VM y que un cron propio hiciera `git pull`—: con la clave solo
+en el runner, una VM comprometida no puede seguir clonando `career-strategy`
+por su cuenta.
+
+**Refresco: enganchado al deploy, no independiente.** El clonado ocurre en
+el mismo job que publica imágenes y despliega: cada push a `main`, o cada
+`workflow_dispatch` manual. Un cambio en `career-strategy` —un
+`scoring_model.yaml` nuevo, una variante regenerada por `build-cvs`— no
+llega a producción hasta el siguiente merge a `main` de `futuro-app`, o
+hasta que se dispare el workflow a mano. Es deliberado y simétrico con
+`assessment/recompute.py`, que tampoco corre solo: repuntuar el histórico
+tras un cambio en los datos ya es un gesto manual, y "refrescar el clon" es
+un gesto de la misma familia.
+
+**Dónde vive en la VM.** `/opt/futuro/data/repo`, un directorio plano que
+`docker-compose.yml` monta de solo lectura en `api` y `worker`
+(`DATA_REPO_HOST_PATH`, con ese valor por omisión). No es un volumen de
+Docker gestionado: es exactamente el mismo patrón que ya usan
+`docker-compose.yml` y `caddy/Caddyfile`, ficheros planos que el deploy
+escribe en `/opt/futuro`.
+
+**Sin este secreto, la comprobación previa falla con un mensaje claro**
+—el mismo patrón que los demás secretos de producción—, así que no hay
+manera de que un deploy llegue a medias por su ausencia.
 
 ## Riesgo conocido: el rollback no revierte migraciones
 
