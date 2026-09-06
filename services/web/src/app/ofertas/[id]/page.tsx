@@ -656,10 +656,7 @@ function AssessButton({
   return (
     <form action={requestAssessment} className="mt-3">
       <input type="hidden" name="capture_id" value={captureId} />
-      <button
-        type="submit"
-        className="rounded border border-acc/40 px-3 py-1.5 font-mono text-xs text-acc hover:bg-acc/10"
-      >
+      <button type="submit" className="btn-primary">
         {label}
       </button>
     </form>
@@ -697,24 +694,21 @@ function VariantOptionRow({
         ) : null}
       </span>
       <div className="flex items-center gap-4">
-        <a
-          href={`/api/offers/${captureId}/cv?variant=${variant}`}
-          className="font-mono text-xs text-ink2 hover:text-acc"
-        >
-          Ver PDF
-        </a>
         {isConfirmed ? null : (
           <form action={confirmVariant}>
             <input type="hidden" name="capture_id" value={captureId} />
             <input type="hidden" name="variant" value={variant} />
-            <button
-              type="submit"
-              className="rounded border border-acc/40 px-2 py-1 font-mono text-xs text-acc hover:bg-acc/10"
-            >
+            <button type="submit" className="btn-primary">
               Confirmar
             </button>
           </form>
         )}
+        <a
+          href={`/api/offers/${captureId}/cv?variant=${variant}`}
+          className="btn-link"
+        >
+          Ver PDF
+        </a>
       </div>
     </div>
   );

@@ -62,6 +62,27 @@ test("confirmar una variante la marca como confirmada y no borra la anterior", a
   ).toHaveCount(0);
 });
 
+test("la fila de variante pone la acción primaria antes que la secundaria", async ({
+  page,
+}) => {
+  // Estructura, no estilo: el prototipo de interfaz siempre pone el botón
+  // primario antes que el enlace secundario ("Descargar CV" antes que "Ver
+  // .tex", "Confirmar y commitear" antes que "Cancelar"). Esta es la única
+  // pieza de esa estructura que existe ya en la app -el resto (barra
+  // lateral, barra inferior) todavía no se ha construido, así que no hay
+  // nada más que este test pueda comprobar todavía-.
+  await pegarYEsperar(page);
+
+  const acciones = page
+    .getByRole("link", { name: "Ver PDF" })
+    .first()
+    .locator("xpath=..");
+  const orden = await acciones.evaluate((el) =>
+    Array.from(el.children).map((c) => c.tagName.toLowerCase()),
+  );
+  expect(orden.indexOf("form")).toBeLessThan(orden.indexOf("a"));
+});
+
 test("el PDF de una variante se descarga con el tipo correcto", async ({
   page,
 }) => {

@@ -32,3 +32,75 @@ body {
   color: var(--color-ink);
   font-family: var(--font-sans);
 }
+
+/*
+ * Botones, decididos el 2026-09-06 a partir del prototipo de interfaz de
+ * Claude ("Futuro — Prototipo de interfaz"), adaptados a esta paleta: ese
+ * prototipo nunca se había destilado a un documento y cada pantalla había
+ * construido los suyos a su criterio. CSS puro y sin JavaScript: siguen
+ * viviendo dentro de <form action={...}> con acciones de servidor, y el
+ * barrido de brillo es una animación de :hover, no algo que dependa de un
+ * cliente.
+ */
+.btn-primary {
+  position: relative;
+  overflow: hidden;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 8px 16px;
+  border-radius: 6px;
+  background: var(--color-acc);
+  color: var(--color-bg);
+  box-shadow: 0 4px 18px color-mix(in srgb, var(--color-acc) 20%, transparent);
+  transition:
+    transform 0.24s cubic-bezier(0.34, 1.4, 0.64, 1),
+    box-shadow 0.24s;
+}
+.btn-primary:hover {
+  transform: translateY(-1.5px);
+  box-shadow: 0 9px 26px color-mix(in srgb, var(--color-acc) 30%, transparent);
+}
+.btn-primary::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    105deg,
+    transparent 35%,
+    rgba(255, 255, 255, 0.45) 50%,
+    transparent 65%
+  );
+  transform: translateX(-130%);
+  transition: transform 0.75s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.btn-primary:hover::after {
+  transform: translateX(130%);
+}
+
+/* La acción secundaria que acompaña a un .btn-primary: subrayado que crece
+ * de izquierda a derecha al pasar el ratón, en vez de relleno. */
+.btn-link {
+  position: relative;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-ink3);
+  transition: color 0.3s;
+}
+.btn-link::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: -4px;
+  width: 0;
+  height: 1px;
+  background: var(--color-acc);
+  transition: width 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.btn-link:hover {
+  color: var(--color-ink);
+}
+.btn-link:hover::after {
+  width: 100%;
+}
