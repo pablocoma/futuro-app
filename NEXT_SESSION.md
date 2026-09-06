@@ -1,8 +1,9 @@
 # Traspaso a la siguiente sesión
 
-Última actualización: 2026-09-05 (M3 cerrada, desplegada y verificada:
-`/api/health` en `data_repo: ok` en producción. **Fase 1 completa de punta a
-punta**, no solo en código).
+Última actualización: 2026-09-06. M3 cerrada, desplegada y verificada el
+2026-09-05: `/api/health` en `data_repo: ok` en producción y una oferta
+puntuada de verdad ese mismo día. **Fase 1 completa de punta a punta**, no
+solo en código. Fase 2 troceada en cinco rebanadas — ver más abajo.
 
 Este archivo contiene el estado operativo del proyecto. Las reglas duraderas
 están en `AGENTS.md`; no deben duplicarse aquí.
@@ -386,7 +387,96 @@ Nada pendiente de este lado.
 
 ## Siguiente objetivo: Fase 2 — perfil editable
 
-Es la primera fase que **escribe** en el repositorio privado `Futuro` y
-necesita la mecánica de `pull --rebase`, diff y confirmación de
-`ARCHITECTURE.md` §5. Su alcance detallado se troceará en su propia sesión,
-partiendo de `ARCHITECTURE.md` §5 y §14 del repositorio privado.
+Es la primera fase que **escribe** en el repositorio privado `Futuro`
+(repositorio de GitHub `career-strategy`), con la mecánica de `pull
+--rebase`, `ruamel.yaml`, validación Pydantic, diff en pantalla,
+confirmación y `commit`+`push` que describe `ARCHITECTURE.md` §5.
+`ARCHITECTURE.md` §14 acota el alcance a **los YAML** del repositorio
+privado —no a la prosa en Markdown ni al maestro en LaTeX—.
+
+Troceo propuesto el 2026-09-06, pendiente de tu confirmación (revisar y
+ajustar es barato; es una propuesta, no un contrato): cinco rebanadas
+verticales, cada una funcionando de punta a punta, ordenadas de menor a
+mayor complejidad del YAML que tocan. Los tamaños de fichero y qué modelos
+ya existen salen de investigar `career-strategy` real el 2026-09-06, no de
+memoria.
+
+- **M0 — El mecanismo de escritura, sobre el YAML más simple que hay:
+  `config/objectives.yaml`** (32 líneas, 6 claves, sin anidar). El objetivo
+  de esta rebanada es demostrar el mecanismo entero —no la complejidad de
+  ningún fichero en concreto—: `pull --rebase`, cargar con `ruamel.yaml`
+  (round-trip, conserva comentarios y orden), validar contra un modelo
+  Pydantic nuevo, enseñar el diff, confirmar, `commit` con autoría `Futuro
+  App <bot@futuro.local>`, `push`, y mostrar el conflicto sin forzar nada
+  si lo hay.
+
+  **Primera decisión de diseño de M0, antes de escribir código:** el clon
+  de M3 es de solo lectura y CI lo **refresca por `rsync` en cada
+  deploy**—reutilizarlo para escritura viva sería peligroso, un despliegue
+  a mitad de una escritura podría machacar un commit todavía sin
+  sincronizar, o pisar un `.git` a medio operar—. Fase 2 necesita su
+  **propio clon**, gestionado por la propia aplicación y no por CI (se
+  clona una vez y luego se hace `pull`/`commit`/`push` repetidos sobre él),
+  con una deploy key **de lectura-escritura**, distinta de la de solo
+  lectura de M3 y de la de despliegue. Proponer ese diseño y esperar el visto
+  bueno antes de tocar código es el mismo patrón que ya funcionó para M3.
+
+- **M1 — Extender a `config/preferences.yaml`** (68 líneas, 9 claves) **y
+  `config/constraints.yaml`** (60 líneas, con `pending_decisions` y
+  `superseded_decisions` como listas de diccionarios). Generaliza el
+  mecanismo de M0 a formas de YAML algo distintas, sin construir nada
+  nuevo de fondo.
+
+- **M2 — El banco de bullets y el contenido de variantes de rol**
+  (`cv/content/professional_bullet_bank.yaml`, 260 líneas, 13 bullets
+  uniformes; `cv/content/role_variant_content.yaml`, 107 líneas, 5
+  variantes). Ya existen modelos Pydantic de **lectura** en
+  `src/cv_builder/models.py` (`BulletBank`, `RoleVariantContent`,
+  `ClaimRules`) que reutilizar o adaptar para la validación de escritura.
+  Las `claim_rules` de `config/cv_variants.yaml` se aplican también al
+  guardar, no solo al construir el CV en CI.
+
+  Incluye, como añadido pequeño y de **solo lectura**, la "pantalla de
+  revisión de redacción para las afirmaciones de estado" que menciona
+  `ARCHITECTURE.md` §14 (`deployed`/`delivered`/`operational`/`adopted`/
+  `reusable`). Investigado el 2026-09-06: las seis afirmaciones ya se
+  revisaron y confirmaron el 2026-08-14 (ver `NEXT_SESSION.md` y los
+  `project_audits/` del repositorio privado) y **hoy no hay ningún bullet
+  bloqueado** por esto. Es "enseñar una decisión ya tomada", no un flujo
+  editorial abierto — no infles esta parte de M2 si la investigación de tu
+  sesión confirma lo mismo.
+
+- **M3 — `config/cv_variants.yaml`** (179 líneas, ya tiene modelo
+  `CvVariantsConfig`) **y `profile/project_catalog.yaml`** (249 líneas, 9
+  proyectos con listas anidadas cada uno, sin modelo Pydantic todavía: hay
+  que escribirlo).
+
+- **M4 — `config/scoring_model.yaml`**, el más grande y el más delicado:
+  309 líneas, 15 claves de primer nivel, mezcla reglas estructuradas con
+  notas en prosa libre (`assumption`/`note`), y es el que de verdad decide
+  qué variante de CV se recomienda en producción. Se deja para el final a
+  propósito. Antes de abrirlo al editor genérico, conviene decidir si
+  necesita un tratamiento aparte —por ejemplo, exigir que los tres
+  hallazgos que M2 de Fase 1 dejó como interpretación del código
+  (`very_low` → `aspirational`, el orden de evaluación de los filtros, el
+  estrechamiento de `cheap`) ya estén declarados en el propio YAML antes de
+  dejar que la UI lo edite, para no abrir una vía por la que se escriba
+  algo que `assessment/scoring.py` no sepa interpretar.
+
+**Deliberadamente fuera de esta troceo:** `profile/master_profile.md`,
+`profile/evidence_bank.md`, `profile/project_audits/*.md` y
+`cv/master/Pablo_Coma_CV_master.tex.jinja2`. Son prosa en Markdown o LaTeX,
+no YAML, y `ARCHITECTURE.md` acota Fase 2 a "los YAML del repositorio
+privado". Si algún día hace falta editarlos desde la app, es una decisión
+de UX distinta —edición de texto libre, o subir/reemplazar el documento
+entero— y no el editor de formularios con diff que construye esta fase.
+
+### Cómo se trabaja esta fase
+
+Mismas reglas que la Fase 1: rebanadas en serie, cada una de punta a
+punta, con su propia entrada (o ampliación) en
+`docs/decisions/fase-2-perfil-editable.md` al cerrarla —no antes: ese
+fichero no existe todavía a propósito, se crea al cerrar M0—, y
+`NEXT_SESSION.md` reescrito con el estado comprobado. Empezar cada
+rebanada (y en particular M0) proponiendo el diseño y esperando el visto
+bueno antes de escribir código, como ya funcionó para M3.
