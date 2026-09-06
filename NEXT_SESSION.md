@@ -385,6 +385,53 @@ omisión del repositorio no es donde vive el contenido— y quedó corregido
 en `deploy.yml`; el detalle está en `docs/decisions/fase-1-nucleo.md`.
 Nada pendiente de este lado.
 
+### Hallazgo del 2026-09-06: el diseño construido no seguía el prototipo
+
+Pablo tiene tres artifacts de Claude (2026-08-13) con el diseño de la app:
+`Futuro — La arquitectura explicada pieza a pieza`, `Futuro — Prototipo de
+interfaz` y `Futuro — Catálogo de opciones`. Comprobado línea a línea contra
+lo construido:
+
+- **La paleta sí se seguía bien.** `docs/APP_SCREENS.md` (2026-09-02) ya
+  había comparado el catálogo de nueve paletas y elegido "Plano técnico"
+  sobre la "Ámbar y pizarra" que usa el prototipo —el prototipo nunca se
+  volvió a publicar tras esa decisión, por eso parece distinto—. `globals.css`
+  coincide token a token. Confirmado con Pablo que "Plano técnico" es lo
+  que quiere: no hay nada que cambiar ahí.
+- **La estructura de componentes (botones) y el layout del shell (barra
+  lateral, barra inferior) nunca se habían destilado a ningún documento.**
+  Cada pantalla de Fase 1 construyó sus botones a su criterio porque no
+  había nada escrito con lo que compararlos. Corregido el 2026-09-06:
+  - Botones: `.btn-primary` / `.btn-link` en `globals.css`, siguiendo el
+    prototipo (relleno sólido + sombra + brillo vs. subrayado que crece),
+    aplicados en `page.tsx`. Confirmado con Pablo.
+  - Orden acción primaria antes que secundaria (el prototipo siempre pone
+    el botón antes que el enlace): corregido en la fila de variante de CV.
+  - El shell (barra lateral de 7 pantallas, barra inferior de 4 en móvil
+    con Capturar/Oferta invertidos, `⌘K` contextual) quedó documentado en
+    `docs/APP_SCREENS.md` §"Estructura del shell", pero **no construido
+    todavía**: Fase 1 nunca hizo una barra de navegación persistente, así
+    que no hay nada de eso que verificar en un test hoy.
+  - Queda sin resolver, y anotado como tal en el propio documento: tres
+    convenciones distintas para "marcar un estado" (color puro sin
+    ornamento, según el prototipo; subrayado, según la tabla de
+    micro-decisiones del mismo documento; símbolo `●`/`▲`/`○` + color,
+    según lo construido y `docs/decisions/fase-1-nucleo.md`). No es una
+    decisión de estructura, así que no se resolvió aquí; necesita su
+    propia conversación con Pablo.
+
+**Decisión sobre el harness de estructura:** no un test de comparación
+visual de píxeles —frágil, caro de mantener—, sino aserciones de Playwright
+sobre *qué existe y en qué orden*, igual que ya se prueban otras cosas en
+este repositorio. Solo se escriben **cuando la estructura ya existe**, no
+antes: `e2e/tests/dossier.spec.ts` ya comprueba que la acción primaria de
+una fila de variante precede a la secundaria, porque esa fila ya está
+construida. La barra lateral y la barra inferior no tienen test todavía
+porque no hay shell que probar; en cuanto se construya (Fase 2 o posterior,
+no hay milestone asignado todavía), su test entra en el mismo commit que su
+código, y debe leer primero `docs/APP_SCREENS.md` §"Estructura del shell"
+del repositorio privado.
+
 ## Siguiente objetivo: Fase 2 — perfil editable
 
 Es la primera fase que **escribe** en el repositorio privado `Futuro`
@@ -394,12 +441,16 @@ confirmación y `commit`+`push` que describe `ARCHITECTURE.md` §5.
 `ARCHITECTURE.md` §14 acota el alcance a **los YAML** del repositorio
 privado —no a la prosa en Markdown ni al maestro en LaTeX—.
 
-Troceo propuesto el 2026-09-06, pendiente de tu confirmación (revisar y
-ajustar es barato; es una propuesta, no un contrato): cinco rebanadas
-verticales, cada una funcionando de punta a punta, ordenadas de menor a
-mayor complejidad del YAML que tocan. Los tamaños de fichero y qué modelos
-ya existen salen de investigar `career-strategy` real el 2026-09-06, no de
-memoria.
+**Troceo confirmado con Pablo el 2026-09-06**, en cinco rebanadas
+verticales, cada una funcionando de punta a punta y **cada una en su propia
+sesión de Claude Code**, para no repetir sesiones larguísimas como la que
+cerró la Fase 1. Ordenadas de menor a mayor complejidad del YAML que tocan.
+Los tamaños de fichero y qué modelos ya existen salen de investigar
+`career-strategy` real el 2026-09-06, no de memoria; si algo cambió,
+re-investigar antes de dar por buena una cifra de aquí. Sigue siendo
+razonable ajustar el troceo si al llegar a una rebanada concreta la
+realidad no encaja con lo previsto — no es un contrato inamovible, es la
+mejor previsión con la información de hoy.
 
 - **M0 — El mecanismo de escritura, sobre el YAML más simple que hay:
   `config/objectives.yaml`** (32 líneas, 6 claves, sin anidar). El objetivo
@@ -473,10 +524,15 @@ entero— y no el editor de formularios con diff que construye esta fase.
 
 ### Cómo se trabaja esta fase
 
-Mismas reglas que la Fase 1: rebanadas en serie, cada una de punta a
-punta, con su propia entrada (o ampliación) en
-`docs/decisions/fase-2-perfil-editable.md` al cerrarla —no antes: ese
-fichero no existe todavía a propósito, se crea al cerrar M0—, y
-`NEXT_SESSION.md` reescrito con el estado comprobado. Empezar cada
-rebanada (y en particular M0) proponiendo el diseño y esperando el visto
-bueno antes de escribir código, como ya funcionó para M3.
+Mismas reglas que la Fase 1, más una nueva: **una rebanada, una sesión de
+Claude Code.** La sesión que cerró la Fase 1 entera —M3, el despliegue, el
+arreglo de `dev`/`main`, y encima el hallazgo de diseño del shell— se hizo
+larguísima. A partir de aquí: rebanadas en serie, cada una de punta a
+punta, cada una en su propia sesión nueva; con su propia entrada (o
+ampliación) en `docs/decisions/fase-2-perfil-editable.md` al cerrarla —no
+antes: ese fichero no existe todavía a propósito, se crea al cerrar M0—, y
+`NEXT_SESSION.md` reescrito con el estado comprobado antes de cerrar la
+sesión, para que la siguiente pueda arrancar solo con leer este archivo.
+Empezar cada rebanada (y en particular M0) proponiendo el diseño y
+esperando el visto bueno antes de escribir código, como ya funcionó para
+M3.
