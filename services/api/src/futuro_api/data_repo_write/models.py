@@ -17,6 +17,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from futuro_api.data_repo_write.vocabularies import BulletCvUsage, BulletEvidenceStatus
 from futuro_api.offers.vocabularies import RoleFamily
 
 # `OTHER` es el motivo de "esto no encaja en ningún objetivo", no una
@@ -313,3 +314,137 @@ class Constraints(EditableConstraints):
 
     version: int = Field(ge=1)
     updated_at: date
+
+
+# ---------------------------------------------------------------------------
+# `config/cv_variants.yaml` -- Fase 2 M2, de solo lectura
+#
+# No se edita en M2 (eso es M3): se lee del propio clon de escritura, ya
+# sincronizado por `pull --rebase`, para validar las `claim_rules` contra
+# el texto de un bullet al guardarlo. Modelo mínimo -solo el bloque que
+# hace falta para esa validación, no el fichero entero-.
+# ---------------------------------------------------------------------------
+
+
+class ProfessionalContributionLanguage(BaseModel):
+    allowed: tuple[str, ...] = Field(min_length=1)
+    blocked_without_specific_confirmation: tuple[str, ...] = ()
+
+
+class ClaimRulesForValidation(BaseModel):
+    professional_contribution_language: ProfessionalContributionLanguage
+
+
+# ---------------------------------------------------------------------------
+# `cv/content/professional_bullet_bank.yaml` -- Fase 2 M2
+#
+# Cada bullet trae más campos de los que el formulario edita. Alcance
+# confirmado con Pablo el 2026-09-07: solo `text_en`, `evidence_status` y
+# `cv_usage` son editables; `bullet_id` es la identidad (inmutable tras
+# crearse, casado igual que `disqualifying_conditions.id` en M1) y el resto
+# -`bullet_type`, `project_id`, `angle`, `confidentiality_status`,
+# `role_variants`, `blocked_by`, `guardrail`- pasa intacto, sin
+# reconstruirse. `policy` (verbos, autorizaciones fechadas, la revisión de
+# redacción de estado del 2026-08-14) es un bloque fijo: se lee y se
+# reescribe tal cual, nunca lo reconstruye Python.
+# ---------------------------------------------------------------------------
+
+
+class BulletEdit(BaseModel):
+    bullet_id: str = Field(min_length=1)
+    text_en: str = Field(min_length=1)
+    evidence_status: BulletEvidenceStatus
+    cv_usage: BulletCvUsage
+
+
+class EditableBulletBank(BaseModel):
+    bullets: tuple[BulletEdit, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _sin_bullet_id_repetido(self) -> EditableBulletBank:
+        ids = [bullet.bullet_id for bullet in self.bullets]
+        duplicated = sorted({bid for bid in ids if ids.count(bid) > 1})
+        if duplicated:
+            raise ValueError(f"bullets repite bullet_id {duplicated}")
+        return self
+
+
+class Bullet(BaseModel):
+    """Una fila entera de `bullets`, tal como sale de `ruamel` al leer."""
+
+    bullet_id: str = Field(min_length=1)
+    bullet_type: str = Field(min_length=1)
+    project_id: str | None = None
+    angle: str = Field(min_length=1)
+    text_en: str = Field(min_length=1)
+    evidence_status: BulletEvidenceStatus
+    confidentiality_status: str | None = None
+    cv_usage: BulletCvUsage
+    role_variants: tuple[str, ...] = ()
+    blocked_by: tuple[str, ...] = ()
+    guardrail: str | None = None
+
+
+class BulletBank(BaseModel):
+    """La forma entera de `professional_bullet_bank.yaml`."""
+
+    version: int = Field(ge=1)
+    updated_at: date
+    language: str = Field(min_length=1)
+    purpose: str = Field(min_length=1)
+    # Bloque fijo, sin editar: se transporta tal cual para poder enseñarlo
+    # (la revisión de redacción de estado, entre otros) sin darle forma.
+    policy: dict[str, Any]
+    bullets: tuple[Bullet, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _sin_bullet_id_repetido(self) -> BulletBank:
+        ids = [bullet.bullet_id for bullet in self.bullets]
+        duplicated = sorted({bid for bid in ids if ids.count(bid) > 1})
+        if duplicated:
+            raise ValueError(
+                f"bullets repite bullet_id {duplicated}; una referencia desde "
+                "candidate_bullet_priority dejaría de ser inequívoca"
+            )
+        return self
+
+
+# ---------------------------------------------------------------------------
+# `cv/content/role_variant_content.yaml` -- Fase 2 M2
+#
+# Las 5 claves de `variants` son fijas -coinciden con `base_variants` de
+# `config/cv_variants.yaml`, que es M3-: decidido con Pablo el 2026-09-07
+# no ofrecer alta ni baja de variantes aquí, solo editar su contenido. La
+# comprobación de que el envío declara exactamente esas claves vive en
+# `role_variant_content.py`, no en este modelo: el modelo no conoce el
+# fichero vigente.
+# ---------------------------------------------------------------------------
+
+
+class SkillRowEdit(BaseModel):
+    label: str = Field(min_length=1)
+    value: str = Field(min_length=1)
+
+
+class VariantContent(BaseModel):
+    """El contenido de una variante. Sin distinción editable/completo: a
+    diferencia de `Bullet`, ninguna variante trae metadato que el
+    formulario no gestione."""
+
+    display_name: str = Field(min_length=1)
+    use_when: str = Field(min_length=1)
+    profile: str = Field(min_length=1)
+    skills: tuple[SkillRowEdit, ...] = Field(min_length=1)
+
+
+class EditableRoleVariantContent(BaseModel):
+    variants: dict[str, VariantContent] = Field(min_length=1)
+
+
+class RoleVariantContent(EditableRoleVariantContent):
+    """La forma entera de `role_variant_content.yaml`."""
+
+    version: int = Field(ge=1)
+    updated_at: date
+    language: str = Field(min_length=1)
+    skills_confirmation: str = Field(min_length=1)

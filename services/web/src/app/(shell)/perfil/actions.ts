@@ -1,17 +1,25 @@
 "use server";
 
 import {
+  commitBulletBank,
   commitConstraints,
   commitObjectives,
   commitPreferences,
+  commitRoleVariants,
+  diffBulletBank,
   diffConstraints,
   diffObjectives,
   diffPreferences,
+  diffRoleVariants,
+  type BulletEdit,
   type DisqualifyingCondition,
+  type EditableBulletBank,
   type EditableConstraints,
   type EditableObjectives,
   type EditablePreferences,
+  type EditableRoleVariantContent,
   type SupersededDecision,
+  type VariantContent,
 } from "@/lib/api";
 import { DECLARABLE_ROLE_FAMILIES } from "@/lib/labels";
 
@@ -27,6 +35,8 @@ export type ObjectivesFormState = {
 
 export type PreferencesFormState = ObjectivesFormState;
 export type ConstraintsFormState = ObjectivesFormState;
+export type BulletBankFormState = ObjectivesFormState;
+export type RoleVariantsFormState = ObjectivesFormState;
 
 /** Texto separado por comas -> lista sin vacíos, mismo criterio en todos
  * los campos de este tipo (`success_dimensions`, `evidence`,
@@ -260,6 +270,85 @@ export async function reviewConstraints(
   }
 
   const result = await diffConstraints(edit);
+  if (!result.ok) {
+    return { error: result.detail, diff: null, saved: false, commitSha: null };
+  }
+  return { error: null, diff: result.data.diff, saved: false, commitSha: null };
+}
+
+/**
+ * `bullets` viaja como JSON en un campo oculto -mismo criterio que
+ * `disqualifying_conditions_json`-: filas de largo variable, ya
+ * mantenidas como estado de React en `BulletBankForm`.
+ */
+function parseBulletBankEdit(formData: FormData): EditableBulletBank {
+  const bullets = JSON.parse(
+    String(formData.get("bullets_json") ?? "[]"),
+  ) as BulletEdit[];
+  return { bullets };
+}
+
+export async function reviewBulletBank(
+  _previous: BulletBankFormState,
+  formData: FormData,
+): Promise<BulletBankFormState> {
+  const intent = String(formData.get("intent") ?? "diff");
+  const edit = parseBulletBankEdit(formData);
+
+  if (intent === "commit") {
+    const result = await commitBulletBank(edit);
+    if (!result.ok) {
+      return { error: result.detail, diff: null, saved: false, commitSha: null };
+    }
+    return {
+      error: null,
+      diff: result.data.diff,
+      saved: true,
+      commitSha: result.data.commit_sha,
+    };
+  }
+
+  const result = await diffBulletBank(edit);
+  if (!result.ok) {
+    return { error: result.detail, diff: null, saved: false, commitSha: null };
+  }
+  return { error: null, diff: result.data.diff, saved: false, commitSha: null };
+}
+
+/**
+ * Las claves de `variants` son fijas -esta rebanada no da de alta ni de
+ * baja variantes-, así que el formulario siempre manda las mismas que
+ * recibió; solo su contenido (incluidas las filas de `skills`, también de
+ * largo variable) viaja como JSON.
+ */
+function parseRoleVariantsEdit(formData: FormData): EditableRoleVariantContent {
+  const variants = JSON.parse(
+    String(formData.get("variants_json") ?? "{}"),
+  ) as Record<string, VariantContent>;
+  return { variants };
+}
+
+export async function reviewRoleVariants(
+  _previous: RoleVariantsFormState,
+  formData: FormData,
+): Promise<RoleVariantsFormState> {
+  const intent = String(formData.get("intent") ?? "diff");
+  const edit = parseRoleVariantsEdit(formData);
+
+  if (intent === "commit") {
+    const result = await commitRoleVariants(edit);
+    if (!result.ok) {
+      return { error: result.detail, diff: null, saved: false, commitSha: null };
+    }
+    return {
+      error: null,
+      diff: result.data.diff,
+      saved: true,
+      commitSha: result.data.commit_sha,
+    };
+  }
+
+  const result = await diffRoleVariants(edit);
   if (!result.ok) {
     return { error: result.detail, diff: null, saved: false, commitSha: null };
   }

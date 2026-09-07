@@ -1,0 +1,37 @@
+# cv_variants.yaml INVENTADO, para sembrar el remoto de git sintético de
+# data_repo_write. Nada de aquí sale del repositorio privado.
+#
+# Fase 2 M2 solo lee `claim_rules` de este fichero -no se edita hasta M3-,
+# así que el resto de claves aquí es un esqueleto plausible y no una
+# réplica del real.
+
+version: 1
+updated_at: 2026-01-01
+
+claim_rules:
+  final_cv_requires:
+    - verified_or_publishable_evidence
+    - defensible_in_interview
+  professional_contribution_language:
+    allowed:
+      - contributed_to
+      - worked_on
+    blocked_without_specific_confirmation:
+      - owned
+      - led
+  variant_rule: >-
+    Nota inventada de regla de variante, para el fixture.
+
+tailorable_sections:
+  - profile
+
+fixed_sections:
+  - identity_and_contact
+
+base_variants:
+  invented_variant_one:
+    target_roles:
+      - invented_role_one
+  invented_variant_two:
+    target_roles:
+      - invented_role_two

@@ -1,0 +1,54 @@
+# Banco de bullets INVENTADO, para sembrar el remoto de git sintético de
+# data_repo_write. Nada de aquí sale del repositorio privado.
+#
+# Dos bullets, no trece: uno elegible (`verified` +
+# `eligible_with_internal_policy_check`, texto que empieza por un verbo
+# permitido de `claim_rules`) y uno todavía no confirmado (`candidate` +
+# `blocked`, con `confidentiality_status` nulo), que es justo el par de
+# casos que ejercitan la validación cruzada de M2 sin necesitar los trece
+# reales.
+
+version: 1
+updated_at: 2026-01-01
+language: en
+
+purpose: >-
+  Banco de bullets inventado para el fixture, sin ningún dato real.
+
+policy:
+  default_evidence_status: candidate
+  default_cv_usage: blocked
+  status_claims_confirmed_2026_08_14: >-
+    Nota inventada de revisión de redacción de estado, para el fixture.
+  allowed_contribution_verbs:
+    - contributed_to
+    - worked_on
+  blocked_ownership_verbs:
+    - led
+    - owned
+
+bullets:
+  - bullet_id: invented_bullet_one
+    bullet_type: project
+    project_id: invented_project
+    angle: invented_angle
+    text_en: >-
+      Contributed to building an invented internal tool for the fixture.
+    evidence_status: verified
+    confidentiality_status: user_approved_anonymized_2026_01_01
+    cv_usage: eligible_with_internal_policy_check
+    role_variants:
+      - invented_variant_one
+    blocked_by: []
+
+  - bullet_id: invented_bullet_two
+    bullet_type: role_scope
+    project_id: null
+    angle: invented_bullet_two
+    text_en: >-
+      Explored an early prototype for the fixture, not yet confirmed.
+    evidence_status: candidate
+    confidentiality_status: null
+    cv_usage: blocked
+    role_variants: []
+    blocked_by: []

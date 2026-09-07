@@ -53,7 +53,7 @@ test("editar el objetivo, ver el diff sin escribir, y confirmar lo escribe y emp
  * propio fichero de punta a punta, mismo patrón que M0 arriba.
  */
 
-test("las tres pestañas de Perfil alternan de fichero sin cambiar de URL", async ({
+test("las cinco pestañas de Perfil alternan de fichero sin cambiar de URL", async ({
   page,
 }) => {
   await page.goto("/perfil");
@@ -66,6 +66,18 @@ test("las tres pestañas de Perfil alternan de fichero sin cambiar de URL", asyn
   await page.getByRole("button", { name: "Restricciones" }).click();
   await expect(
     page.getByRole("heading", { name: "Restricciones", exact: true }),
+  ).toBeVisible();
+  await expect(page).toHaveURL(/\/perfil$/);
+
+  await page.getByRole("button", { name: "Bullets" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Banco de bullets" }),
+  ).toBeVisible();
+  await expect(page).toHaveURL(/\/perfil$/);
+
+  await page.getByRole("button", { name: "Variantes de rol" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Variantes de rol" }),
   ).toBeVisible();
   await expect(page).toHaveURL(/\/perfil$/);
 
@@ -141,4 +153,104 @@ test("añadir una condición descalificante y una decisión sustituida, ver el d
   await page.getByRole("button", { name: "Restricciones" }).click();
   await expect(page.getByText(nuevoId)).toBeVisible();
   await expect(page.getByPlaceholder("clave").last()).toHaveValue(nuevaClave);
+});
+
+/**
+ * M2: el banco de bullets y el contenido de variantes de rol. Contra el
+ * fixture sintético de `data_repo_write`, con dos bullets
+ * (`invented_bullet_one`, `invented_bullet_two`) y dos variantes
+ * (`invented_variant_one`, `invented_variant_two`) -no los trece bullets
+ * ni las cinco variantes reales, ver `docs/decisions/fase-2-perfil-editable.md`-.
+ */
+
+test("editar el texto de un bullet existente, ver el diff, y confirmar lo escribe y empuja", async ({
+  page,
+}) => {
+  const marca = `e2e-${Date.now()}`;
+  const texto = `Contributed to an invented change ${marca}.`;
+
+  await page.goto("/perfil");
+  await page.getByRole("button", { name: "Bullets" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Banco de bullets" }),
+  ).toBeVisible();
+
+  await page.getByLabel("Texto de invented_bullet_one").fill(texto);
+  await page.getByRole("button", { name: "Ver cambios" }).click();
+
+  const diff = page.locator("pre");
+  await expect(diff).toBeVisible();
+  await expect(diff).toContainText(texto);
+
+  await page.getByRole("button", { name: "Confirmar y guardar" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Escrito y empujado" }),
+  ).toBeVisible();
+
+  await page.reload();
+  await page.getByRole("button", { name: "Bullets" }).click();
+  await expect(page.getByLabel("Texto de invented_bullet_one")).toHaveValue(texto);
+});
+
+test("añadir un bullet nuevo, ver el diff, y confirmar lo escribe sin tocar los existentes", async ({
+  page,
+}) => {
+  const marca = `e2e-${Date.now()}`;
+  const nuevoId = `bullet_${marca}`;
+  const nuevoTexto = `Worked on a bullet added by e2e ${marca}.`;
+
+  await page.goto("/perfil");
+  await page.getByRole("button", { name: "Bullets" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Banco de bullets" }),
+  ).toBeVisible();
+
+  await page.getByPlaceholder("identificador").fill(nuevoId);
+  await page.getByPlaceholder("texto").fill(nuevoTexto);
+  await page.getByRole("button", { name: "+ Añadir bullet" }).click();
+
+  await page.getByRole("button", { name: "Ver cambios" }).click();
+  const diff = page.locator("pre");
+  await expect(diff).toBeVisible();
+  await expect(diff).toContainText(nuevoId);
+
+  await page.getByRole("button", { name: "Confirmar y guardar" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Escrito y empujado" }),
+  ).toBeVisible();
+
+  await page.reload();
+  await page.getByRole("button", { name: "Bullets" }).click();
+  await expect(page.getByText(nuevoId)).toBeVisible();
+});
+
+test("editar el perfil de una variante de rol, ver el diff, y confirmar lo escribe y empuja", async ({
+  page,
+}) => {
+  const marca = `e2e-${Date.now()}`;
+  const perfil = `Perfil editado por e2e ${marca}.`;
+
+  await page.goto("/perfil");
+  await page.getByRole("button", { name: "Variantes de rol" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Variantes de rol" }),
+  ).toBeVisible();
+
+  await page.getByLabel("Perfil de invented_variant_one").fill(perfil);
+  await page.getByRole("button", { name: "Ver cambios" }).click();
+
+  const diff = page.locator("pre");
+  await expect(diff).toBeVisible();
+  await expect(diff).toContainText(perfil);
+
+  await page.getByRole("button", { name: "Confirmar y guardar" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Escrito y empujado" }),
+  ).toBeVisible();
+
+  await page.reload();
+  await page.getByRole("button", { name: "Variantes de rol" }).click();
+  await expect(page.getByLabel("Perfil de invented_variant_one")).toHaveValue(
+    perfil,
+  );
 });

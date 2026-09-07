@@ -29,6 +29,28 @@ reales el 2026-09-07:
 
 La única forma fiable de no ensuciar el diff es no tocar nada cuando el
 valor no cambió de verdad.
+
+**Hallazgo de Fase 2 M2, con `professional_bullet_bank.yaml` real**: un
+`null` explícito (`project_id: null`) se volvía a escribir en blanco
+(`project_id:`) con la sola secuencia cargar->volcar, **sin tocar nada**.
+No es un bug de `set_folded_if_changed` ni de ninguna de las dos funciones
+de arriba -esos campos no pasan por ninguna de las dos-: es que el
+representador de `None` por omisión de `ruamel.yaml` en modo *round-trip*
+no reproduce el estilo `null` del nodo original, a diferencia de como sí
+trata los escalares de texto y las listas. Comprobado byte a byte contra
+`career-strategy` real el 2026-09-07: sin el representador de más abajo,
+cargar y volcar `professional_bullet_bank.yaml` sin ninguna edición ya
+difiere en esa línea.
+
+**Segundo hallazgo de M2, con `role_variant_content.yaml` real**: sus
+`skills.value` son escalares planos de una sola línea física, algunos por
+encima de los 80 caracteres del ancho por omisión de `ruamel`; cargar y
+volcar sin ninguna edición partía esa línea en dos. Ensanchar
+`yaml.width` lo corrige **sin romper** el round-trip de los campos
+plegados de los otros tres ficheros -comprobado explícitamente: `ruamel`
+no fuerza un re-envolvido al ancho nuevo, conserva los saltos de línea del
+escalar tal como se cargó mientras quepan bajo ese ancho-, así que un
+ancho generoso es estrictamente más seguro que el de 80 por omisión.
 """
 
 from __future__ import annotations
@@ -40,10 +62,19 @@ from ruamel.yaml import YAML
 from ruamel.yaml.scalarstring import FoldedScalarString
 
 
+def _represent_none(representer: Any, _data: None) -> Any:
+    return representer.represent_scalar("tag:yaml.org,2002:null", "null")
+
+
 def data_repo_yaml() -> YAML:
     yaml = YAML(typ="rt")
     yaml.preserve_quotes = True
     yaml.indent(mapping=2, sequence=4, offset=2)
+    # Generoso a propósito: por debajo de esto, un escalar plano de una
+    # sola línea física más largo que el ancho se parte en dos al volcar,
+    # aunque no se haya tocado -ver el hallazgo de arriba-.
+    yaml.width = 100_000
+    yaml.representer.add_representer(type(None), _represent_none)
     return yaml
 
 

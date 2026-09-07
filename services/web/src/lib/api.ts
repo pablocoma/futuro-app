@@ -585,3 +585,146 @@ export function commitConstraints(
 ): Promise<PostResult<ConstraintsCommit>> {
   return apiPost<ConstraintsCommit>("/api/profile/constraints/commit", edit);
 }
+
+/**
+ * `cv/content/professional_bullet_bank.yaml`, Fase 2 M2.
+ *
+ * Solo `text_en`, `evidence_status` y `cv_usage` son editables por fila
+ * -alcance confirmado con Pablo el 2026-09-07-: `BulletEdit` es justo esos
+ * cuatro campos (`bullet_id` casa la fila). El resto de un `Bullet`
+ * -`bullet_type`, `project_id`, `angle`, `confidentiality_status`,
+ * `role_variants`, `blocked_by`, `guardrail`- viaja de vuelta pero no se
+ * manda al editar: el backend lo deja intacto.
+ *
+ * `evidence_status`/`cv_usage` sí son vocabulario de código -a diferencia
+ * de la mayoría de campos de Fase 2-, así que sí llevan mapa de etiquetas
+ * en `labels.ts`, mismo criterio que `role_families`.
+ */
+export type BulletEvidenceStatus =
+  | "candidate"
+  | "verified"
+  | "publishable"
+  | "rejected";
+export type BulletCvUsage =
+  | "blocked"
+  | "conditional"
+  | "eligible_with_internal_policy_check";
+
+export type Bullet = {
+  bullet_id: string;
+  bullet_type: string;
+  project_id: string | null;
+  angle: string;
+  text_en: string;
+  evidence_status: BulletEvidenceStatus;
+  confidentiality_status: string | null;
+  cv_usage: BulletCvUsage;
+  role_variants: string[];
+  blocked_by: string[];
+  guardrail: string | null;
+};
+
+export type BulletEdit = {
+  bullet_id: string;
+  text_en: string;
+  evidence_status: BulletEvidenceStatus;
+  cv_usage: BulletCvUsage;
+};
+
+export type BulletBank = {
+  version: number;
+  updated_at: string;
+  language: string;
+  purpose: string;
+  /** Bloque fijo, sin editar -incluida la revisión de redacción de
+   * estado del 2026-08-14, `policy.status_claims_confirmed_2026_08_14`-. */
+  policy: Record<string, unknown>;
+  bullets: Bullet[];
+};
+
+export type EditableBulletBank = { bullets: BulletEdit[] };
+export type BulletBankDiff = { diff: string; validated: BulletBank };
+export type BulletBankCommit = { commit_sha: string; diff: string };
+
+export async function getBulletBank(): Promise<BulletBank | null> {
+  try {
+    const response = await fetch(`${API_INTERNAL_URL}/api/profile/bullet-bank`, {
+      headers: await cookieHeaders(),
+      cache: "no-store",
+    });
+    if (!response.ok) return null;
+    return (await response.json()) as BulletBank;
+  } catch {
+    return null;
+  }
+}
+
+export function diffBulletBank(
+  edit: EditableBulletBank,
+): Promise<PostResult<BulletBankDiff>> {
+  return apiPost<BulletBankDiff>("/api/profile/bullet-bank/diff", edit);
+}
+
+export function commitBulletBank(
+  edit: EditableBulletBank,
+): Promise<PostResult<BulletBankCommit>> {
+  return apiPost<BulletBankCommit>("/api/profile/bullet-bank/commit", edit);
+}
+
+/**
+ * `cv/content/role_variant_content.yaml`, Fase 2 M2.
+ *
+ * Las claves de `variants` son fijas -coinciden con `base_variants` de
+ * `config/cv_variants.yaml`, que es Fase 2 M3-: esta rebanada no da de
+ * alta ni de baja variantes, solo edita el contenido de las que ya hay.
+ */
+export type SkillRow = { label: string; value: string };
+
+export type VariantContent = {
+  display_name: string;
+  use_when: string;
+  profile: string;
+  skills: SkillRow[];
+};
+
+export type RoleVariantContent = {
+  version: number;
+  updated_at: string;
+  language: string;
+  skills_confirmation: string;
+  variants: Record<string, VariantContent>;
+};
+
+export type EditableRoleVariantContent = {
+  variants: Record<string, VariantContent>;
+};
+export type RoleVariantContentDiff = {
+  diff: string;
+  validated: RoleVariantContent;
+};
+export type RoleVariantContentCommit = { commit_sha: string; diff: string };
+
+export async function getRoleVariants(): Promise<RoleVariantContent | null> {
+  try {
+    const response = await fetch(`${API_INTERNAL_URL}/api/profile/role-variants`, {
+      headers: await cookieHeaders(),
+      cache: "no-store",
+    });
+    if (!response.ok) return null;
+    return (await response.json()) as RoleVariantContent;
+  } catch {
+    return null;
+  }
+}
+
+export function diffRoleVariants(
+  edit: EditableRoleVariantContent,
+): Promise<PostResult<RoleVariantContentDiff>> {
+  return apiPost<RoleVariantContentDiff>("/api/profile/role-variants/diff", edit);
+}
+
+export function commitRoleVariants(
+  edit: EditableRoleVariantContent,
+): Promise<PostResult<RoleVariantContentCommit>> {
+  return apiPost<RoleVariantContentCommit>("/api/profile/role-variants/commit", edit);
+}

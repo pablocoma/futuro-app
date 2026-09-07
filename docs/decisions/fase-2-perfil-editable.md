@@ -472,3 +472,174 @@ comprobado a mano contra el stack de Compose real por `curl`
 **Sin verificar, y no se puede desde aquí:** lo mismo que M0 -la deploy
 key de verdad y el directorio en la VM de producción-, sin cambios desde
 entonces.
+
+## 2026-09-07 — M2, el banco de bullets y el contenido de variantes de rol
+
+### La investigación confirmó los tamaños y corrigió el plan de "reutilizar"
+
+`cv/content/professional_bullet_bank.yaml` (260 líneas, 13 bullets) y
+`cv/content/role_variant_content.yaml` (107 líneas, 5 variantes) seguían
+sin tocarse desde el 2026-08-13/14 y con la forma exacta que el troceo
+daba por hecha. `config/cv_variants.yaml` (179 líneas) tampoco había
+cambiado desde entonces.
+
+Lo que **no** se sostuvo fue "reutilizar `src/cv_builder/models.py`" tal
+cual proponía `NEXT_SESSION.md`. `cv-builder` (el generador de CI) y
+`futuro-api` (esta API) son dos paquetes Python independientes -
+`pyproject.toml`/`uv.lock` propios, sin `tool.uv.sources` que los enlace,
+y el `Dockerfile` de `api` no copia `src/cv_builder` a su imagen-. Prueba
+de ello: `data_repo/loader.py` (el lado de lectura del scoring) ya define
+su **propio** `Bullet`, distinto del de `cv_builder`, para el mismo
+concepto. Añadir `cv-builder` como dependencia de `futuro-api` habría
+acoplado el ciclo de vida de dos paquetes que se despliegan por separado,
+por una lógica de validación que cabe en ~30 líneas sin dependencias de
+framework. **Decisión: portar, no importar.** `data_repo_write/claim_language.py`
+copia `validate_contribution_language`/`_phrase_and_prefix` de
+`cv_builder/claim_rules.py`, con un comentario que explica el porqué y
+deja constancia de que una edición del original no se propaga sola.
+
+### La validación cruzada: `config/cv_variants.yaml` se lee, no se edita
+
+`config/cv_variants.yaml` es M3, no M2. Sus `claim_rules` se leen de
+solo lectura del mismo clon de escritura ya sincronizado por
+`pull --rebase` -sin clon nuevo, sin tocar `git_ops.py`-, con un modelo
+Pydantic mínimo (`ClaimRulesForValidation`, solo
+`professional_contribution_language.{allowed, blocked_without_specific_confirmation}`).
+Se valida **todo** bullet cuyo `(evidence_status, cv_usage)` final sea
+`(verified, eligible_with_internal_policy_check)` -no solo los que hoy
+estén en el `candidate_bullet_priority` de alguna variante, a diferencia
+de `cv_builder.build.resolve_variant`-, porque revalidar el documento
+entero tras aplicar la edición es la misma disciplina que ya aplican
+`objectives.py`/`preferences.py`/`constraints.py`.
+
+Hallazgo de paso: el propio `professional_bullet_bank.yaml` trae un
+bloque `policy.allowed_contribution_verbs`/`blocked_ownership_verbs` con
+un vocabulario parecido pero no idéntico al de `cv_variants.yaml`
+(`participated_in` frente a `participated_in_development`). Ningún
+código -ni `claim_rules.py` ni `build.py`- lee nunca ese bloque: la
+validación real siempre corre contra `cv_variants.yaml`. `policy` se
+trata en M2 como bloque fijo, sin editar, transportado tal cual.
+
+### Dos hallazgos nuevos de `ruamel.yaml`, distintos de los de M0/M1
+
+Investigar con un fixture sintético que incluyera las formas difíciles
+del fichero real -mismo hábito que corrigió el bug de M1- sacó a la luz
+dos bugs de round-trip que no se habían visto porque ningún fichero
+anterior los tenía:
+
+- **Un `null` explícito se volvía a escribir en blanco.** `project_id: null`
+  se convertía en `project_id:` con la sola secuencia cargar→volcar, **sin
+  tocar nada** -comprobado byte a byte contra `professional_bullet_bank.yaml`
+  real-. El representador de `None` por omisión de `ruamel` en modo
+  *round-trip* no reproduce el estilo `null` del nodo original. Corregido
+  registrando un representador propio en `yaml_style.data_repo_yaml()`
+  (`tag:yaml.org,2002:null` / texto `null`), compartido por los cuatro
+  módulos de fichero.
+- **Un escalar plano de una sola línea física por encima de 80 caracteres
+  se partía en dos al volcar**, sin tocarlo -`role_variant_content.yaml`
+  real tiene varias líneas de `skills.value` así-. Corregido ensanchando
+  `yaml.width` a un valor generoso (100.000). Comprobado explícitamente
+  que esto **no** rompe el round-trip de los campos plegados de los otros
+  tres ficheros: `ruamel` no fuerza un re-envolvido al ancho nuevo,
+  conserva los saltos de línea del escalar tal como se cargó mientras
+  quepan bajo ese ancho.
+
+Los cinco ficheros reales (`objectives.yaml`, `preferences.yaml`,
+`constraints.yaml`, `professional_bullet_bank.yaml`,
+`role_variant_content.yaml`) se comprobaron byte a byte tras el arreglo,
+igual que `config/cv_variants.yaml` -de solo lectura en M2, pero que M3
+heredará el mismo mecanismo-.
+
+### Alcance confirmado con Pablo el 2026-09-07
+
+- **Bullets: solo `text_en`, `evidence_status` y `cv_usage` son
+  editables por fila.** `bullet_id` casa cada edición contra la fila
+  existente -mismo criterio que `disqualifying_conditions.id` en M1-; el
+  resto (`bullet_type`, `project_id`, `angle`, `confidentiality_status`,
+  `role_variants`, `blocked_by`, `guardrail`) pasa intacto.
+- **Alta sí, baja no.** Añadir un `bullet_id` nuevo crea una fila con
+  valores por defecto seguros para los campos que el formulario no
+  gestiona (`project_id: null`, `angle` = el propio `bullet_id`,
+  `bullet_type: role_scope` -el único valor real que ya trae
+  `project_id: null`-, `role_variants`/`blocked_by` vacíos) y **sin
+  fabricar una `confidentiality_status`**: se deja `null`, en vez de
+  inventar una confirmación de confidencialidad que nadie ha dado.
+- **Las 5 claves de `variants` en `role_variant_content.yaml` son
+  fijas.** Coinciden con `base_variants` de `config/cv_variants.yaml`
+  (M3); esta rebanada no ofrece alta ni baja, solo edita
+  `display_name`/`use_when`/`profile`/`skills` de las que ya hay. El
+  envío tiene que declarar exactamente esas claves, ni más ni menos
+  -comprobado en `role_variant_content.py`, no en el modelo, porque el
+  modelo no conoce el fichero vigente-.
+- **`evidence_status`/`cv_usage` pasan a ser vocabulario de código.**
+  Ningún código lo exigía antes -solo se comparaban contra una constante
+  cada uno-, pero un typo dejaría un bullet inalcanzable en silencio,
+  igual que `RoleFamily`. Cerrados en `data_repo_write/vocabularies.py`:
+  `evidence_status` con los cuatro valores que `profile/project_catalog.yaml`
+  ya documenta para el mismo concepto (`candidate`/`verified`/
+  `publishable`/`rejected`); `cv_usage` con los observados en el propio
+  banco de bullets más `conditional` (`blocked`/`conditional`/
+  `eligible_with_internal_policy_check`).
+
+### `skills`: CRUD por posición, no por identificador
+
+Sin clave estable que casar -a diferencia de `bullets`-, `_apply_skills`
+en `role_variant_content.py` muta cada fila por posición: la fila `i`
+existente se edita en su sitio si cambia, las de más se añaden al final,
+las que sobran se quitan del final. Nunca se reemplaza la `CommentedSeq`
+entera de una tacada: hacerlo, incluso con contenido casi idéntico,
+perdía la línea en blanco que separaba una variante de la siguiente -el
+mismo hallazgo de M1 sobre listas de nivel superior, aquí en una lista
+anidada-. **Limitación conocida y sin resolver:** añadir una fila nueva sí
+deja esa línea en blanco mal colocada -antes de la fila añadida en vez de
+después-, porque `ruamel` no traslada el comentario de fin de bloque al
+añadir un elemento. El YAML resultante es válido y el contenido correcto;
+es una línea en blanco fuera de sitio, no un dato perdido, y no se
+consideró que mereciera la complejidad de tocar `.ca.items` de `ruamel`
+para un caso tan acotado.
+
+### La pantalla: dos pestañas más, cinco en total
+
+`/perfil` pasa a tener cinco pestañas -Objetivos, Preferencias,
+Restricciones, Bullets, Variantes de rol-. `BulletBankForm` y
+`RoleVariantsForm` siguen el mismo patrón que `ConstraintsForm`: filas de
+largo variable viajan como JSON en un campo oculto
+(`bullets_json`, `variants_json`), campos controlados -nunca
+`defaultValue`-, un único `useActionState` con `intent=diff|commit`. Los
+campos de una fila que se repiten entre bullets/variantes (`Texto de`,
+`Estado de la evidencia`, `Perfil`) llevan además un `aria-label` con el
+identificador de la fila -`Texto de invented_bullet_one`-, porque su
+etiqueta visible sola no basta para que Playwright (o un lector de
+pantalla) distinga una fila de otra.
+
+La "revisión de redacción de las afirmaciones de estado" que pedía
+`ARCHITECTURE.md` §14 se investigó de nuevo el 2026-09-07: las seis
+afirmaciones (`deployed`, `delivering`, `operational`, `transformed`,
+`reusable`, más la adopción de `work_data_review_workflow`) siguen
+confirmadas el 2026-08-14 en `profile/project_audits/*.md`, y ese mismo
+registro vive como prosa en `policy.status_claims_confirmed_2026_08_14`
+del propio banco de bullets. Se enseña de solo lectura en la pestaña de
+Bullets -un párrafo, sin botones-, sin construir ningún flujo editorial
+nuevo, tal como pedía `NEXT_SESSION.md`.
+
+### Fixtures y verificación
+
+Fixtures nuevos, con datos inventados: `config/cv_variants.yaml` (de solo
+lectura para M2, con `claim_rules` inventadas pero con la misma forma que
+el real) y `cv/content/{professional_bullet_bank,role_variant_content}.yaml`
+bajo `tests/fixtures/data_repo_write/` -dos bullets y dos variantes, no
+trece y cinco: bastan para ejercitar el CRUD, la validación cruzada y la
+regla de "claves fijas" sin necesitar el volumen real-.
+
+Verificado en esta máquina el 2026-09-07: `make check` limpio (402 tests
+API -38 nuevos de `bullet_bank`, `role_variant_content`, `claim_language`
+y el router- + 17 web), `make e2e` con los 23 tests en verde -incluidos
+los 3 nuevos de `perfil.spec.ts`: editar el texto de un bullet, añadir un
+bullet nuevo, y editar el perfil de una variante-, y capturas de pantalla
+de las dos pestañas nuevas revisadas a mano. El remoto de git local
+(`.dev-data/repo-write-remote.git`) se volvió a resembrar tras ampliar el
+fixture -mismo precio que M1 ya documentó-.
+
+**Sin verificar, y no se puede desde aquí:** lo mismo que M0/M1 -la
+deploy key de verdad y el directorio en la VM de producción-, sin
+cambios desde entonces.

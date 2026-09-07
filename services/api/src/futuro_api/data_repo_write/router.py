@@ -25,15 +25,26 @@ from fastapi import APIRouter, Body, HTTPException, Request, status
 from pydantic import BaseModel
 
 from futuro_api.config import Settings
-from futuro_api.data_repo_write import constraints, git_ops, objectives, preferences
+from futuro_api.data_repo_write import (
+    bullet_bank,
+    constraints,
+    git_ops,
+    objectives,
+    preferences,
+    role_variant_content,
+)
 from futuro_api.data_repo_write.git_ops import GitRemote
 from futuro_api.data_repo_write.models import (
+    BulletBank,
     Constraints,
+    EditableBulletBank,
     EditableConstraints,
     EditableObjectives,
     EditablePreferences,
+    EditableRoleVariantContent,
     Objectives,
     Preferences,
+    RoleVariantContent,
 )
 
 router = APIRouter(prefix="/api/profile", tags=["profile"])
@@ -300,3 +311,147 @@ async def commit_constraints(
         ) from error
 
     return ConstraintsCommitResponse(commit_sha=sha, diff=result.unified_diff)
+
+
+class BulletBankDiffResponse(BaseModel):
+    diff: str
+    validated: BulletBank
+
+
+class BulletBankCommitResponse(BaseModel):
+    commit_sha: str
+    diff: str
+
+
+@router.get("/bullet-bank", summary="El professional_bullet_bank.yaml vigente")
+async def get_bullet_bank(request: Request) -> BulletBank:
+    root, remote = _configured(request)
+    _sync(root, remote)
+    return bullet_bank.current(root)
+
+
+@router.post(
+    "/bullet-bank/diff",
+    summary="Calcula el diff de una edición, sin escribir nada",
+)
+async def diff_bullet_bank(
+    request: Request, edit: Annotated[EditableBulletBank, Body()]
+) -> BulletBankDiffResponse:
+    root, remote = _configured(request)
+    _sync(root, remote)
+    try:
+        result = bullet_bank.prepare(root, edit, today=date.today())
+    except bullet_bank.BulletBankValidationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+        ) from error
+    return BulletBankDiffResponse(diff=result.unified_diff, validated=result.validated)
+
+
+@router.post(
+    "/bullet-bank/commit",
+    status_code=status.HTTP_201_CREATED,
+    summary="Escribe, commitea y empuja una edición",
+)
+async def commit_bullet_bank(
+    request: Request, edit: Annotated[EditableBulletBank, Body()]
+) -> BulletBankCommitResponse:
+    root, remote = _configured(request)
+    _sync(root, remote)
+    try:
+        result = bullet_bank.write(root, edit, today=date.today())
+    except bullet_bank.BulletBankValidationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+        ) from error
+
+    try:
+        sha = git_ops.commit_and_push(
+            root,
+            remote,
+            [bullet_bank.RELATIVE_PATH],
+            message="profile: actualizar cv/content/professional_bullet_bank.yaml",
+            author_name=AUTHOR_NAME,
+            author_email=AUTHOR_EMAIL,
+        )
+    except git_ops.GitConflictError as error:
+        raise _conflict(error) from error
+    except git_ops.GitOpsError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)
+        ) from error
+
+    return BulletBankCommitResponse(commit_sha=sha, diff=result.unified_diff)
+
+
+class RoleVariantContentDiffResponse(BaseModel):
+    diff: str
+    validated: RoleVariantContent
+
+
+class RoleVariantContentCommitResponse(BaseModel):
+    commit_sha: str
+    diff: str
+
+
+@router.get("/role-variants", summary="El role_variant_content.yaml vigente")
+async def get_role_variants(request: Request) -> RoleVariantContent:
+    root, remote = _configured(request)
+    _sync(root, remote)
+    return role_variant_content.current(root)
+
+
+@router.post(
+    "/role-variants/diff",
+    summary="Calcula el diff de una edición, sin escribir nada",
+)
+async def diff_role_variants(
+    request: Request, edit: Annotated[EditableRoleVariantContent, Body()]
+) -> RoleVariantContentDiffResponse:
+    root, remote = _configured(request)
+    _sync(root, remote)
+    try:
+        result = role_variant_content.prepare(root, edit, today=date.today())
+    except role_variant_content.RoleVariantContentValidationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+        ) from error
+    return RoleVariantContentDiffResponse(
+        diff=result.unified_diff, validated=result.validated
+    )
+
+
+@router.post(
+    "/role-variants/commit",
+    status_code=status.HTTP_201_CREATED,
+    summary="Escribe, commitea y empuja una edición",
+)
+async def commit_role_variants(
+    request: Request, edit: Annotated[EditableRoleVariantContent, Body()]
+) -> RoleVariantContentCommitResponse:
+    root, remote = _configured(request)
+    _sync(root, remote)
+    try:
+        result = role_variant_content.write(root, edit, today=date.today())
+    except role_variant_content.RoleVariantContentValidationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+        ) from error
+
+    try:
+        sha = git_ops.commit_and_push(
+            root,
+            remote,
+            [role_variant_content.RELATIVE_PATH],
+            message="profile: actualizar cv/content/role_variant_content.yaml",
+            author_name=AUTHOR_NAME,
+            author_email=AUTHOR_EMAIL,
+        )
+    except git_ops.GitConflictError as error:
+        raise _conflict(error) from error
+    except git_ops.GitOpsError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)
+        ) from error
+
+    return RoleVariantContentCommitResponse(commit_sha=sha, diff=result.unified_diff)

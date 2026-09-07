@@ -66,11 +66,15 @@ shell mínimo (barra lateral/inferior con Pipeline, Capturar y Perfil), M0
 —el mecanismo de escritura entero, demostrado sobre
 `config/objectives.yaml`: `pull --rebase`, `ruamel.yaml`, validación
 Pydantic, diff en pantalla, `commit`+`push` con autoría propia y
-conflicto sin forzar nada— y M1 —el mismo mecanismo generalizado a
-`config/preferences.yaml` y `config/constraints.yaml`, con `/perfil` ya en
-tres pestañas— están cerrados y verificados en esta máquina. Pendiente de
-aprovisionar a mano en producción: la deploy key de lectura-escritura
-(`docs/deployment.md` §10). Siguiente: M2.
+conflicto sin forzar nada—, M1 —el mismo mecanismo generalizado a
+`config/preferences.yaml` y `config/constraints.yaml`— y M2 —el banco de
+bullets (`cv/content/professional_bullet_bank.yaml`) y el contenido de
+variantes de rol (`cv/content/role_variant_content.yaml`), con las
+`claim_rules` de `config/cv_variants.yaml` (de solo lectura hasta M3)
+validadas también al guardar— están cerrados y verificados en esta
+máquina, con `/perfil` ya en cinco pestañas. Pendiente de aprovisionar a
+mano en producción: la deploy key de lectura-escritura
+(`docs/deployment.md` §10). Siguiente: M3.
 
 ## Desarrollo local
 

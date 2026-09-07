@@ -1,0 +1,35 @@
+# Contenido de variantes INVENTADO, para sembrar el remoto de git
+# sintético de data_repo_write. Nada de aquí sale del repositorio privado.
+#
+# Dos variantes, no cinco: las claves son fijas en Fase 2 M2 -no se puede
+# dar de alta ni de baja una variante desde el formulario, decidido con
+# Pablo el 2026-09-07-, así que dos bastan para probar esa regla sin
+# necesitar las cinco reales.
+
+version: 1
+updated_at: 2026-01-01
+language: en
+skills_confirmation: invented_confirmation_2026_01_01
+
+variants:
+  invented_variant_one:
+    display_name: Invented Variant One
+    use_when: >-
+      Nota inventada de cuándo usar esta variante, para el fixture.
+    profile: >-
+      Perfil inventado para la variante uno, sin ningún dato real.
+    skills:
+      - label: Programming
+        value: Invented, Language
+      - label: Tools
+        value: Invented Tool A, Invented Tool B
+
+  invented_variant_two:
+    display_name: Invented Variant Two
+    use_when: >-
+      Otra nota inventada de cuándo usar esta variante, para el fixture.
+    profile: >-
+      Perfil inventado para la variante dos, sin ningún dato real.
+    skills:
+      - label: Programming
+        value: Invented, Language

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  BULLET_CV_USAGE_LABELS,
+  BULLET_EVIDENCE_STATUS_LABELS,
   EFFORT_LABELS,
   GATE_STATUS_LABELS,
   PORTFOLIO_LABELS,
@@ -54,6 +56,19 @@ describe("etiquetas de la puntuación", () => {
       "low",
       "medium",
       "very_low",
+    ]);
+    // Fase 2 M2: `evidence_status`/`cv_usage` de un bullet, cerrados en
+    // `data_repo_write/vocabularies.py` -no en el repositorio privado-.
+    expect(Object.keys(BULLET_EVIDENCE_STATUS_LABELS).sort()).toEqual([
+      "candidate",
+      "publishable",
+      "rejected",
+      "verified",
+    ]);
+    expect(Object.keys(BULLET_CV_USAGE_LABELS).sort()).toEqual([
+      "blocked",
+      "conditional",
+      "eligible_with_internal_policy_check",
     ]);
   });
 

@@ -3,8 +3,9 @@
 Última actualización: 2026-09-07. Fase 1 completa de punta a punta (M0-M3,
 desplegada el 2026-09-05). Fase 2 arrancó el 2026-09-06 con el shell
 mínimo y M0 (`config/objectives.yaml`); M1 (`preferences.yaml`,
-`constraints.yaml`) cerrada el 2026-09-07 — ver más abajo. M2 es el
-siguiente objetivo.
+`constraints.yaml`) cerrada el 2026-09-07; M2 (el banco de bullets y el
+contenido de variantes de rol) cerrada el mismo 2026-09-07 — ver más
+abajo. M3 es el siguiente objetivo.
 
 Este archivo contiene el estado operativo del proyecto. Las reglas duraderas
 están en `AGENTS.md`; no deben duplicarse aquí.
@@ -535,31 +536,71 @@ contra el stack de Compose real tras resembrar `.dev-data/` -el remoto de
 git local seguía teniendo la forma vieja de los fixtures de M0, y `make
 seed-data-repo-write` solo siembra una vez-.
 
-## Siguiente objetivo: Fase 2 · M2
+### M2 — el banco de bullets y el contenido de variantes de rol, cerrada el 2026-09-07
 
-- **M2 — El banco de bullets y el contenido de variantes de rol**
-  (`cv/content/professional_bullet_bank.yaml`, 260 líneas, 13 bullets
-  uniformes; `cv/content/role_variant_content.yaml`, 107 líneas, 5
-  variantes). Ya existen modelos Pydantic de **lectura** en
-  `src/cv_builder/models.py` (`BulletBank`, `RoleVariantContent`,
-  `ClaimRules`) que reutilizar o adaptar para la validación de escritura.
-  Las `claim_rules` de `config/cv_variants.yaml` se aplican también al
-  guardar, no solo al construir el CV en CI.
+Investigado antes de escribir código: los tres ficheros implicados
+(`cv/content/professional_bullet_bank.yaml`, 260 líneas, 13 bullets;
+`cv/content/role_variant_content.yaml`, 107 líneas, 5 variantes;
+`config/cv_variants.yaml`, 179 líneas, de solo lectura en esta rebanada)
+seguían sin tocarse desde el 2026-08-13/14 y con la forma exacta prevista.
+Lo que **no** se sostuvo fue "reutilizar `src/cv_builder/models.py`":
+`cv-builder` y `futuro-api` son dos paquetes Python sin workspace que los
+conecte y sin que el `Dockerfile` de `api` copie `src/cv_builder` a su
+imagen, así que se **portó** (no se importó) la validación de
+`claim_rules` a `data_repo_write/claim_language.py`. El detalle completo,
+y el porqué de cada decisión, está en
+`docs/decisions/fase-2-perfil-editable.md`.
 
-  Incluye, como añadido pequeño y de **solo lectura**, la "pantalla de
-  revisión de redacción para las afirmaciones de estado" que menciona
-  `ARCHITECTURE.md` §14 (`deployed`/`delivered`/`operational`/`adopted`/
-  `reusable`). Investigado el 2026-09-06: las seis afirmaciones ya se
-  revisaron y confirmaron el 2026-08-14 (ver `NEXT_SESSION.md` y los
-  `project_audits/` del repositorio privado) y **hoy no hay ningún bullet
-  bloqueado** por esto. Es "enseñar una decisión ya tomada", no un flujo
-  editorial abierto — no infles esta parte de M2 si la investigación de tu
-  sesión confirma lo mismo.
+Dos hallazgos nuevos de `ruamel.yaml`, ninguno visto en M0/M1 porque
+ningún fichero anterior tenía estas formas: un `null` explícito se volvía
+a escribir en blanco con la sola secuencia cargar→volcar -corregido
+registrando un representador de `None` en `yaml_style.data_repo_yaml()`-,
+y un escalar plano de una sola línea por encima de 80 caracteres se
+partía en dos al volcar -corregido ensanchando `yaml.width`, comprobado
+que no rompe el round-trip de los campos plegados de los otros ficheros-.
+Los cinco ficheros reales, más `config/cv_variants.yaml`, se comprobaron
+byte a byte tras el arreglo.
+
+Alcance confirmado con Pablo el 2026-09-07: en bullets, solo
+`text_en`/`evidence_status`/`cv_usage` son editables por fila (`bullet_id`
+casa la edición, el resto pasa intacto); alta sí, baja no, y una fila
+nueva no fabrica una `confidentiality_status` que nadie ha confirmado. Las
+5 claves de `variants` en `role_variant_content.yaml` son fijas -esta
+rebanada no da de alta ni de baja variantes, solo edita su contenido-.
+`evidence_status`/`cv_usage` pasan a ser vocabulario de código
+(`data_repo_write/vocabularies.py`), cerrados con los valores que
+`profile/project_catalog.yaml` ya documenta para el mismo concepto. La
+"revisión de redacción de las afirmaciones de estado" de
+`ARCHITECTURE.md` §14 se investigó de nuevo y sigue confirmada -sin
+ningún bullet bloqueado-: se enseña de solo lectura en la pestaña de
+Bullets, sin flujo editorial nuevo.
+
+`/perfil` pasa a tener cinco pestañas -Objetivos, Preferencias,
+Restricciones, Bullets, Variantes de rol-.
+
+Verificado en esta máquina el 2026-09-07: `make check` limpio (402 tests
+API -38 nuevos- + 17 web), `make e2e` con los 23 tests en verde
+-incluidos los 3 nuevos de `perfil.spec.ts`-, capturas de pantalla de las
+dos pestañas nuevas revisadas a mano, y el remoto de git local resembrado
+tras ampliar el fixture de escritura -mismo precio que M1 ya documentó-.
+
+**Sin verificar, y no se puede desde aquí:** lo mismo que M0/M1 -la
+deploy key de verdad y el directorio en la VM de producción-, sin cambios
+desde entonces.
+
+## Siguiente objetivo: Fase 2 · M3
 
 - **M3 — `config/cv_variants.yaml`** (179 líneas, ya tiene modelo
-  `CvVariantsConfig`) **y `profile/project_catalog.yaml`** (249 líneas, 9
-  proyectos con listas anidadas cada uno, sin modelo Pydantic todavía: hay
-  que escribirlo).
+  `CvVariantsConfig` en `src/cv_builder/models.py`; M2 confirmó que ese
+  paquete no se importa desde `futuro-api`, así que M3 también portará o
+  adaptará un modelo de escritura propio, no importará el de `cv_builder`)
+  **y `profile/project_catalog.yaml`** (249 líneas, 9 proyectos con listas
+  anidadas cada uno, sin modelo Pydantic todavía: hay que escribirlo).
+  M3 también empieza a **editar** `candidate_bullet_priority` y
+  `base_variants`, que referencian `bullet_id` del banco de M2 y claves de
+  `role_variant_content.yaml`: conviene investigar si hace falta validar
+  esas referencias cruzadas al guardar, con el mismo cuidado que M2 aplicó
+  a `claim_rules`.
 
 - **M4 — `config/scoring_model.yaml`**, el más grande y el más delicado:
   309 líneas, 15 claves de primer nivel, mezcla reglas estructuradas con

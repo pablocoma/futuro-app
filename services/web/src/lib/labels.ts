@@ -123,6 +123,24 @@ export const ROLE_FAMILY_LABELS: Record<string, string> = {
 export const DECLARABLE_ROLE_FAMILIES = Object.keys(ROLE_FAMILY_LABELS);
 
 /**
+ * `evidence_status`/`cv_usage` de un bullet, Fase 2 M2. Vocabulario de
+ * código -`data_repo_write/vocabularies.py`, no el repositorio privado-,
+ * así que sí se traducen aquí, mismo criterio que `ROLE_FAMILY_LABELS`.
+ */
+export const BULLET_EVIDENCE_STATUS_LABELS: Record<string, string> = {
+  candidate: "candidato, sin confirmar",
+  verified: "verificado",
+  publishable: "publicable",
+  rejected: "rechazado",
+};
+
+export const BULLET_CV_USAGE_LABELS: Record<string, string> = {
+  blocked: "bloqueado",
+  conditional: "condicional",
+  eligible_with_internal_policy_check: "elegible, con revisión de política",
+};
+
+/**
  * Un identificador del repositorio de datos, legible.
  *
  * `career_capital_and_brand` → «Career capital and brand». No se traduce: el
