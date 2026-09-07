@@ -53,7 +53,7 @@ test("editar el objetivo, ver el diff sin escribir, y confirmar lo escribe y emp
  * propio fichero de punta a punta, mismo patrón que M0 arriba.
  */
 
-test("las cinco pestañas de Perfil alternan de fichero sin cambiar de URL", async ({
+test("las siete pestañas de Perfil alternan de fichero sin cambiar de URL", async ({
   page,
 }) => {
   await page.goto("/perfil");
@@ -78,6 +78,18 @@ test("las cinco pestañas de Perfil alternan de fichero sin cambiar de URL", asy
   await page.getByRole("button", { name: "Variantes de rol" }).click();
   await expect(
     page.getByRole("heading", { name: "Variantes de rol" }),
+  ).toBeVisible();
+  await expect(page).toHaveURL(/\/perfil$/);
+
+  await page.getByRole("button", { name: "Variantes de CV" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Variantes de CV" }),
+  ).toBeVisible();
+  await expect(page).toHaveURL(/\/perfil$/);
+
+  await page.getByRole("button", { name: "Catálogo de proyectos" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Catálogo de proyectos" }),
   ).toBeVisible();
   await expect(page).toHaveURL(/\/perfil$/);
 
@@ -253,4 +265,84 @@ test("editar el perfil de una variante de rol, ver el diff, y confirmar lo escri
   await expect(page.getByLabel("Perfil de invented_variant_one")).toHaveValue(
     perfil,
   );
+});
+
+/**
+ * M3: `config/cv_variants.yaml` (solo `base_variants`, editable; el resto
+ * -`claim_rules`, `fixed_sections`...- es de solo lectura) y
+ * `profile/project_catalog.yaml` (primera vez que esta app lo edita).
+ * Contra el mismo fixture sintético, ampliado para M3 con
+ * `invented_variant_blocked` -de solo lectura, sin listas de prioridad- y
+ * dos proyectos (`invented_project_professional`,
+ * `invented_project_academic`).
+ */
+
+test("editar el énfasis de una variante de CV activa, ver el diff, y confirmar lo escribe y empuja", async ({
+  page,
+}) => {
+  const marca = `e2e-${Date.now()}`;
+  const enfasis = `invented_emphasis_${marca}`;
+
+  await page.goto("/perfil");
+  await page.getByRole("button", { name: "Variantes de CV" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Variantes de CV" }),
+  ).toBeVisible();
+
+  // La variante bloqueada -con `status`- se enseña de solo lectura, sin
+  // ningún campo editable.
+  await expect(page.getByText("invented_variant_blocked")).toBeVisible();
+
+  await page
+    .getByLabel("Énfasis de invented_variant_one")
+    .fill(enfasis);
+  await page.getByRole("button", { name: "Ver cambios" }).click();
+
+  const diff = page.locator("pre");
+  await expect(diff).toBeVisible();
+  await expect(diff).toContainText(enfasis);
+
+  await page.getByRole("button", { name: "Confirmar y guardar" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Escrito y empujado" }),
+  ).toBeVisible();
+
+  await page.reload();
+  await page.getByRole("button", { name: "Variantes de CV" }).click();
+  await expect(page.getByLabel("Énfasis de invented_variant_one")).toHaveValue(
+    enfasis,
+  );
+});
+
+test("editar el nombre de un proyecto del catálogo, ver el diff, y confirmar lo escribe y empuja", async ({
+  page,
+}) => {
+  const marca = `e2e-${Date.now()}`;
+  const nombre = `Invented Professional Project ${marca}`;
+
+  await page.goto("/perfil");
+  await page.getByRole("button", { name: "Catálogo de proyectos" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Catálogo de proyectos" }),
+  ).toBeVisible();
+
+  await page
+    .getByLabel("Nombre de invented_project_professional")
+    .fill(nombre);
+  await page.getByRole("button", { name: "Ver cambios" }).click();
+
+  const diff = page.locator("pre");
+  await expect(diff).toBeVisible();
+  await expect(diff).toContainText(nombre);
+
+  await page.getByRole("button", { name: "Confirmar y guardar" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Escrito y empujado" }),
+  ).toBeVisible();
+
+  await page.reload();
+  await page.getByRole("button", { name: "Catálogo de proyectos" }).click();
+  await expect(
+    page.getByLabel("Nombre de invented_project_professional"),
+  ).toHaveValue(nombre);
 });

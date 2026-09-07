@@ -4,8 +4,10 @@
 desplegada el 2026-09-05). Fase 2 arrancó el 2026-09-06 con el shell
 mínimo y M0 (`config/objectives.yaml`); M1 (`preferences.yaml`,
 `constraints.yaml`) cerrada el 2026-09-07; M2 (el banco de bullets y el
-contenido de variantes de rol) cerrada el mismo 2026-09-07 — ver más
-abajo. M3 es el siguiente objetivo.
+contenido de variantes de rol) cerrada el mismo 2026-09-07; M3
+(`config/cv_variants.yaml` y `profile/project_catalog.yaml`, la primera
+rebanada con validación cruzada de verdad entre ficheros) cerrada
+también el 2026-09-07 — ver más abajo. M4 es el siguiente objetivo.
 
 Este archivo contiene el estado operativo del proyecto. Las reglas duraderas
 están en `AGENTS.md`; no deben duplicarse aquí.
@@ -588,19 +590,82 @@ tras ampliar el fixture de escritura -mismo precio que M1 ya documentó-.
 deploy key de verdad y el directorio en la VM de producción-, sin cambios
 desde entonces.
 
-## Siguiente objetivo: Fase 2 · M3
+### M3 — `config/cv_variants.yaml` y `profile/project_catalog.yaml`, cerrada el 2026-09-07
 
-- **M3 — `config/cv_variants.yaml`** (179 líneas, ya tiene modelo
-  `CvVariantsConfig` en `src/cv_builder/models.py`; M2 confirmó que ese
-  paquete no se importa desde `futuro-api`, así que M3 también portará o
-  adaptará un modelo de escritura propio, no importará el de `cv_builder`)
-  **y `profile/project_catalog.yaml`** (249 líneas, 9 proyectos con listas
-  anidadas cada uno, sin modelo Pydantic todavía: hay que escribirlo).
-  M3 también empieza a **editar** `candidate_bullet_priority` y
-  `base_variants`, que referencian `bullet_id` del banco de M2 y claves de
-  `role_variant_content.yaml`: conviene investigar si hace falta validar
-  esas referencias cruzadas al guardar, con el mismo cuidado que M2 aplicó
-  a `claim_rules`.
+Investigado antes de escribir código: los dos ficheros (179 y 249
+líneas) seguían sin tocarse desde el 2026-08-13 y con el tamaño
+previsto, pero dos supuestos del troceo no se sostuvieron.
+`project_catalog.yaml` tiene **8 proyectos, no 9** -el noveno que se
+contaba es `discovery_backlog`, que el propio fichero declara que no
+son proyectos-. Y `exclusive_evidence` de `cv_variants.yaml` -se creía
+que referenciaba `project_id` de `project_catalog.yaml`, como
+`professional_project_priority`/`public_project_priority`- en realidad
+referencia un **`bullet_id`** de `professional_bullet_bank.yaml`: la
+validación cruzada tiene dos espacios de nombres distintos, no uno. El
+detalle completo, y el porqué de cada decisión, está en
+`docs/decisions/fase-2-perfil-editable.md`.
+
+`profile/project_catalog.yaml` no tenía modelo Pydantic ni ningún
+camino de lectura en esta app hasta ahora -confirmado por grep-.
+Documenta su propio vocabulario de `cv_usage`/`interview_usage`
+(`eligible`/`conditional`/`blocked`), distinto del de `BulletCvUsage`
+que M2 cerró para el banco de bullets aunque comparta nombre de campo;
+`ProjectCvUsage` es un enum nuevo. Su `evidence_status`, en cambio, sí
+reutiliza `BulletEvidenceStatus` tal cual -mismo concepto, y es
+precisamente el fichero del que M2 lo tomó-.
+
+Alcance confirmado con Pablo el 2026-09-07, las tres opciones
+recomendadas: `claim_rules` de `cv_variants.yaml` queda de solo lectura
+-M2 ya depende de él como barrera externa, a diferencia del criterio
+permisivo que sí se le dio a `hard_constraints` en M1-;
+`quant_exploratory` -la única variante de `base_variants` con `status`
+en vez de las listas de prioridad, sin contraparte en
+`role_variant_content.yaml`- queda de solo lectura y fuera de la
+validación cruzada; y los campos atípicos de las 5 variantes activas
+(`display_name`, `target_role_condition`, `note`, `exclusive_evidence`)
+son de solo lectura, mismo patrón que los campos no gestionados de
+`Bullet` en M2. En `project_catalog.yaml`: `project_id` casa cada
+edición, sin alta ni baja -`discovery_backlog` queda fuera-, y solo
+`safe_name`/`evidence_status`/`cv_usage`/`interview_usage`/
+`pending_confirmations` son editables por fila.
+
+La validación cruzada al guardar `cv_variants.yaml` comprueba, contra
+los otros tres ficheros ya sincronizados en el mismo clon: que cada
+`bullet_id` en `candidate_bullet_priority`/`exclusive_evidence` exista
+en el banco de bullets; que cada `project_id` en
+`professional_project_priority`/`public_project_priority` exista en el
+catálogo; y que las claves de `role_variant_content.yaml` sean
+subconjunto de las variantes activas -inclusión, no igualdad-. Se deja
+para cuando haga falta de verdad: que el `project_id` esté en el lado
+correcto (`professional_project_priority` solo con proyectos
+`professional`, etc. -hoy se cumple, no se fuerza-), que un bullet
+referenciado esté además en estado elegible para CV (ya lo filtra
+`cv_builder.build.resolve_variant` al generar), y la semántica de
+"exclusividad" real de `exclusive_evidence` entre variantes.
+
+Los dos ficheros reales, y la validación cruzada completa, se
+comprobaron contra el `career-strategy` real -no solo el fixture-:
+`current()` los carga, valida y vuelve a volcar **idénticos byte a
+byte**, sin ningún hallazgo nuevo de `ruamel.yaml`; y la validación
+cruzada corrida contra los cinco ficheros reales a la vez no encontró
+ninguna referencia rota.
+
+`/perfil` pasa a tener siete pestañas -Objetivos, Preferencias,
+Restricciones, Bullets, Variantes de rol, Variantes de CV, Catálogo de
+proyectos-.
+
+Verificado en esta máquina el 2026-09-07: `make check` limpio (435
+tests API -33 nuevos- + 17 web), `make e2e` con los 25 tests en verde
+-incluidos los 2 nuevos de `perfil.spec.ts`-, capturas de pantalla de
+las dos pestañas nuevas revisadas a mano, y el remoto de git local
+resembrado tras ampliar el fixture de escritura -mismo precio que M1/M2
+ya documentaron-.
+
+**Sin verificar, y no se puede desde aquí:** lo mismo que M0/M1/M2 -la
+deploy key de verdad y el directorio en la VM de producción-, sin
+cambios desde entonces.
+
+## Siguiente objetivo: Fase 2 · M4
 
 - **M4 — `config/scoring_model.yaml`**, el más grande y el más delicado:
   309 líneas, 15 claves de primer nivel, mezcla reglas estructuradas con

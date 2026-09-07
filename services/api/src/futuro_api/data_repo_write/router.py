@@ -28,22 +28,28 @@ from futuro_api.config import Settings
 from futuro_api.data_repo_write import (
     bullet_bank,
     constraints,
+    cv_variants,
     git_ops,
     objectives,
     preferences,
+    project_catalog,
     role_variant_content,
 )
 from futuro_api.data_repo_write.git_ops import GitRemote
 from futuro_api.data_repo_write.models import (
     BulletBank,
     Constraints,
+    CvVariants,
     EditableBulletBank,
     EditableConstraints,
+    EditableCvVariants,
     EditableObjectives,
     EditablePreferences,
+    EditableProjectCatalog,
     EditableRoleVariantContent,
     Objectives,
     Preferences,
+    ProjectCatalog,
     RoleVariantContent,
 )
 
@@ -455,3 +461,147 @@ async def commit_role_variants(
         ) from error
 
     return RoleVariantContentCommitResponse(commit_sha=sha, diff=result.unified_diff)
+
+
+class CvVariantsDiffResponse(BaseModel):
+    diff: str
+    validated: CvVariants
+
+
+class CvVariantsCommitResponse(BaseModel):
+    commit_sha: str
+    diff: str
+
+
+@router.get("/cv-variants", summary="El cv_variants.yaml vigente")
+async def get_cv_variants(request: Request) -> CvVariants:
+    root, remote = _configured(request)
+    _sync(root, remote)
+    return cv_variants.current(root)
+
+
+@router.post(
+    "/cv-variants/diff",
+    summary="Calcula el diff de una edición, sin escribir nada",
+)
+async def diff_cv_variants(
+    request: Request, edit: Annotated[EditableCvVariants, Body()]
+) -> CvVariantsDiffResponse:
+    root, remote = _configured(request)
+    _sync(root, remote)
+    try:
+        result = cv_variants.prepare(root, edit, today=date.today())
+    except cv_variants.CvVariantsValidationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+        ) from error
+    return CvVariantsDiffResponse(diff=result.unified_diff, validated=result.validated)
+
+
+@router.post(
+    "/cv-variants/commit",
+    status_code=status.HTTP_201_CREATED,
+    summary="Escribe, commitea y empuja una edición",
+)
+async def commit_cv_variants(
+    request: Request, edit: Annotated[EditableCvVariants, Body()]
+) -> CvVariantsCommitResponse:
+    root, remote = _configured(request)
+    _sync(root, remote)
+    try:
+        result = cv_variants.write(root, edit, today=date.today())
+    except cv_variants.CvVariantsValidationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+        ) from error
+
+    try:
+        sha = git_ops.commit_and_push(
+            root,
+            remote,
+            [cv_variants.RELATIVE_PATH],
+            message="profile: actualizar config/cv_variants.yaml",
+            author_name=AUTHOR_NAME,
+            author_email=AUTHOR_EMAIL,
+        )
+    except git_ops.GitConflictError as error:
+        raise _conflict(error) from error
+    except git_ops.GitOpsError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)
+        ) from error
+
+    return CvVariantsCommitResponse(commit_sha=sha, diff=result.unified_diff)
+
+
+class ProjectCatalogDiffResponse(BaseModel):
+    diff: str
+    validated: ProjectCatalog
+
+
+class ProjectCatalogCommitResponse(BaseModel):
+    commit_sha: str
+    diff: str
+
+
+@router.get("/project-catalog", summary="El project_catalog.yaml vigente")
+async def get_project_catalog(request: Request) -> ProjectCatalog:
+    root, remote = _configured(request)
+    _sync(root, remote)
+    return project_catalog.current(root)
+
+
+@router.post(
+    "/project-catalog/diff",
+    summary="Calcula el diff de una edición, sin escribir nada",
+)
+async def diff_project_catalog(
+    request: Request, edit: Annotated[EditableProjectCatalog, Body()]
+) -> ProjectCatalogDiffResponse:
+    root, remote = _configured(request)
+    _sync(root, remote)
+    try:
+        result = project_catalog.prepare(root, edit, today=date.today())
+    except project_catalog.ProjectCatalogValidationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+        ) from error
+    return ProjectCatalogDiffResponse(
+        diff=result.unified_diff, validated=result.validated
+    )
+
+
+@router.post(
+    "/project-catalog/commit",
+    status_code=status.HTTP_201_CREATED,
+    summary="Escribe, commitea y empuja una edición",
+)
+async def commit_project_catalog(
+    request: Request, edit: Annotated[EditableProjectCatalog, Body()]
+) -> ProjectCatalogCommitResponse:
+    root, remote = _configured(request)
+    _sync(root, remote)
+    try:
+        result = project_catalog.write(root, edit, today=date.today())
+    except project_catalog.ProjectCatalogValidationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+        ) from error
+
+    try:
+        sha = git_ops.commit_and_push(
+            root,
+            remote,
+            [project_catalog.RELATIVE_PATH],
+            message="profile: actualizar profile/project_catalog.yaml",
+            author_name=AUTHOR_NAME,
+            author_email=AUTHOR_EMAIL,
+        )
+    except git_ops.GitConflictError as error:
+        raise _conflict(error) from error
+    except git_ops.GitOpsError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)
+        ) from error
+
+    return ProjectCatalogCommitResponse(commit_sha=sha, diff=result.unified_diff)

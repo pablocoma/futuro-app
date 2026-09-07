@@ -1,0 +1,88 @@
+# project_catalog.yaml INVENTADO, para sembrar el remoto de git sintético
+# de data_repo_write. Nada de aquí sale del repositorio privado.
+#
+# Fase 2 M3 es la primera vez que esta app lee o escribe este fichero: dos
+# proyectos, no ocho, bastan para ejercitar el CRUD por fila y la
+# validación cruzada de cv_variants.yaml sin necesitar el volumen real.
+# `invented_project_professional` e `invented_project_academic` son los
+# `project_id` que referencian `professional_project_priority`/
+# `public_project_priority` en el fixture de `config/cv_variants.yaml`.
+
+version: 1
+updated_at: 2026-01-01
+
+purpose: >-
+  Índice inventado para el fixture, sin ningún dato real.
+
+rules:
+  canonical_detail_source: >-
+    Nota inventada de fuente canónica, para el fixture.
+  allowed_evidence_statuses:
+    - candidate
+    - verified
+    - publishable
+    - rejected
+  cv_claim_policy: >-
+    Nota inventada de política de afirmaciones, para el fixture.
+  work_project_policy: >-
+    Nota inventada de política de proyectos de trabajo, para el fixture.
+  naming_policy: >-
+    Nota inventada de política de nombres, para el fixture.
+  tailoring_policy: >-
+    Nota inventada de política de selección, para el fixture.
+  tailoring_sequence:
+    - filter_out_rejected_or_blocked_projects
+    - require_verified_claims_for_final_cv_text
+  selection_note: >-
+    Nota inventada de selección, para el fixture.
+
+schema:
+  project_id: stable_non_sensitive_identifier
+  safe_name: public_or_anonymized_name
+  source_type: professional_or_academic_or_personal
+  evidence_status: candidate_or_verified_or_publishable_or_rejected
+  confidentiality: public_or_anonymized_or_private
+  canonical_source: repository_relative_path
+  role_family_fit: []
+  professional_value_signals: []
+  cv_usage: eligible_or_conditional_or_blocked
+  interview_usage: eligible_or_conditional_or_blocked
+  pending_confirmations: []
+
+projects:
+  - project_id: invented_project_professional
+    safe_name: Invented Professional Project
+    source_type: professional
+    evidence_status: verified
+    confidentiality: anonymized
+    canonical_source: profile/project_audits/invented_project_professional.md
+    role_family_fit:
+      - invented_role_family
+    professional_value_signals:
+      - invented_signal
+    cv_usage: conditional
+    interview_usage: conditional
+    pending_confirmations:
+      - invented_pending_confirmation
+
+  - project_id: invented_project_academic
+    safe_name: Invented Academic Project
+    source_type: academic
+    evidence_status: publishable
+    confidentiality: public
+    canonical_source: profile/project_audits/invented_project_academic.md
+    role_family_fit:
+      - invented_role_family
+    professional_value_signals:
+      - invented_signal
+    cv_usage: eligible
+    interview_usage: eligible
+    pending_confirmations: []
+
+discovery_backlog:
+  canonical_source: profile/evidence_bank.md
+  status: candidate
+  items:
+    - Invented backlog item
+  note: >-
+    Nota inventada de candidatos pendientes de auditoría, para el fixture.

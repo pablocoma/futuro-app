@@ -15,9 +15,13 @@ from collections.abc import Mapping
 from datetime import date
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from futuro_api.data_repo_write.vocabularies import BulletCvUsage, BulletEvidenceStatus
+from futuro_api.data_repo_write.vocabularies import (
+    BulletCvUsage,
+    BulletEvidenceStatus,
+    ProjectCvUsage,
+)
 from futuro_api.offers.vocabularies import RoleFamily
 
 # `OTHER` es el motivo de "esto no encaja en ningún objetivo", no una
@@ -448,3 +452,208 @@ class RoleVariantContent(EditableRoleVariantContent):
     updated_at: date
     language: str = Field(min_length=1)
     skills_confirmation: str = Field(min_length=1)
+
+
+# ---------------------------------------------------------------------------
+# `config/cv_variants.yaml` -- Fase 2 M3
+#
+# `claim_rules`, `fixed_sections`, `tailorable_sections`,
+# `vacancy_tailoring_process` y `strategy` son de solo lectura, sin ningún
+# camino de edición: `fixed_sections` por regla dura de `AGENTS.md`,
+# `claim_rules` porque M2 ya depende de él como barrera externa que valida
+# cada bullet al guardarlo -decidido con Pablo el 2026-09-07 no ofrecerle
+# aquí el mismo criterio permisivo que sí se le dio a `hard_constraints`
+# en M1-. Se leen y se reescriben tal cual, mismo tratamiento que `policy`
+# en `BulletBank`.
+#
+# `base_variants` tiene 6 claves reales, solo 5 son editables:
+# `quant_exploratory` -detectada por traer `status`, no por su nombre, para
+# que la regla generalice si se bloquea otra variante igual el día de
+# mañana- no tiene las listas de prioridad y no tiene contraparte en
+# `role_variant_content.yaml`. Decidido con Pablo el 2026-09-07: de solo
+# lectura, fuera del formulario y fuera de la validación cruzada. Las 5
+# activas comparten un núcleo editable -`target_roles`/`emphasis`/
+# `professional_project_priority`/`public_project_priority`/
+# `candidate_bullet_priority`-; sus campos atípicos (`display_name`,
+# `target_role_condition`, `note`, `exclusive_evidence`) son de solo
+# lectura, mismo patrón que los campos no gestionados de `Bullet` en M2.
+# ---------------------------------------------------------------------------
+
+
+class BaseVariantEdit(BaseModel):
+    """Los campos editables, comunes a las 5 variantes activas."""
+
+    target_roles: tuple[str, ...] = Field(min_length=1)
+    emphasis: tuple[str, ...] = Field(min_length=1)
+    professional_project_priority: tuple[str, ...] = Field(min_length=1)
+    public_project_priority: tuple[str, ...] = Field(min_length=1)
+    candidate_bullet_priority: tuple[str, ...] = Field(min_length=1)
+
+
+class EditableCvVariants(BaseModel):
+    base_variants: dict[str, BaseVariantEdit] = Field(min_length=1)
+
+
+class BaseVariant(BaseModel):
+    """Una fila entera de `base_variants`, tal como sale de `ruamel` al
+    leer. Una variante activa siempre trae el núcleo de `BaseVariantEdit`
+    más, según el caso, alguno de los campos atípicos; `status` marca la
+    excepción -`quant_exploratory` hoy-, donde el resto puede faltar de
+    verdad."""
+
+    target_roles: tuple[str, ...] = ()
+    emphasis: tuple[str, ...] = ()
+    professional_project_priority: tuple[str, ...] = ()
+    public_project_priority: tuple[str, ...] = ()
+    candidate_bullet_priority: tuple[str, ...] = ()
+    display_name: str | None = None
+    target_role_condition: str | None = None
+    note: str | None = None
+    exclusive_evidence: tuple[str, ...] = ()
+    status: str | None = None
+
+
+class CvVariants(BaseModel):
+    """La forma entera de `config/cv_variants.yaml`."""
+
+    version: int = Field(ge=1)
+    updated_at: date
+    strategy: str = Field(min_length=1)
+    # Bloques fijos, sin editar por ningún camino: se transportan tal cual.
+    claim_rules: dict[str, Any]
+    tailorable_sections: tuple[str, ...] = ()
+    fixed_sections: tuple[str, ...] = ()
+    base_variants: dict[str, BaseVariant] = Field(min_length=1)
+    vacancy_tailoring_process: tuple[str, ...] = ()
+
+    @property
+    def active_variant_ids(self) -> frozenset[str]:
+        """Las claves con las listas de prioridad -todo `base_variants`
+        salvo las bloqueadas con `status`, `quant_exploratory` hoy-."""
+        return frozenset(
+            variant_id
+            for variant_id, variant in self.base_variants.items()
+            if variant.status is None
+        )
+
+    @property
+    def referenced_bullet_ids(self) -> frozenset[str]:
+        """Todo `bullet_id` referenciado desde una variante activa, en
+        `candidate_bullet_priority` o en `exclusive_evidence` -esta
+        segunda no se edita en esta rebanada, pero se revalida igual,
+        misma disciplina de "revalidar el documento entero" que ya
+        aplican los cuatro módulos anteriores."""
+        ids: set[str] = set()
+        for variant_id in self.active_variant_ids:
+            variant = self.base_variants[variant_id]
+            ids.update(variant.candidate_bullet_priority)
+            ids.update(variant.exclusive_evidence)
+        return frozenset(ids)
+
+    @property
+    def referenced_project_ids(self) -> frozenset[str]:
+        """Todo `project_id` referenciado desde una variante activa, en
+        `professional_project_priority` o en `public_project_priority`."""
+        ids: set[str] = set()
+        for variant_id in self.active_variant_ids:
+            variant = self.base_variants[variant_id]
+            ids.update(variant.professional_project_priority)
+            ids.update(variant.public_project_priority)
+        return frozenset(ids)
+
+
+# ---------------------------------------------------------------------------
+# `profile/project_catalog.yaml` -- Fase 2 M3
+#
+# Primer módulo de escritura para este fichero: sin ningún camino de
+# lectura previo en la aplicación, confirmado por grep el 2026-09-07.
+# Mismo mecanismo que los demás: `current`/`prepare`/`write`, revalida el
+# documento entero tras aplicar la edición.
+#
+# `project_id` casa cada edición, igual que `bullet_id` en M2. Sin alta ni
+# baja: `discovery_backlog` -candidatos sin auditar- y promover uno de
+# ellos a proyecto quedan fuera, es una decisión mayor con su propio
+# dossier detrás, no algo que ofrezca este formulario.
+#
+# Editable por fila: `safe_name`, `evidence_status`, `cv_usage`,
+# `interview_usage`, `pending_confirmations`. `source_type`,
+# `confidentiality`, `canonical_source`, `role_family_fit` y
+# `professional_value_signals` son de solo lectura -estructurales, sin
+# motivo para tocarlos desde aquí-.
+#
+# `evidence_status` reutiliza `BulletEvidenceStatus` -mismos cuatro
+# valores, y es precisamente el fichero del que M2 los tomó-.
+# `cv_usage`/`interview_usage` usan `ProjectCvUsage`, un vocabulario
+# propio y distinto de `BulletCvUsage` aunque comparta nombre de campo.
+# ---------------------------------------------------------------------------
+
+
+class ProjectEdit(BaseModel):
+    project_id: str = Field(min_length=1)
+    safe_name: str = Field(min_length=1)
+    evidence_status: BulletEvidenceStatus
+    cv_usage: ProjectCvUsage
+    interview_usage: ProjectCvUsage
+    pending_confirmations: tuple[str, ...] = ()
+
+
+class EditableProjectCatalog(BaseModel):
+    projects: tuple[ProjectEdit, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _sin_project_id_repetido(self) -> EditableProjectCatalog:
+        ids = [project.project_id for project in self.projects]
+        duplicated = sorted({pid for pid in ids if ids.count(pid) > 1})
+        if duplicated:
+            raise ValueError(f"projects repite project_id {duplicated}")
+        return self
+
+
+class Project(BaseModel):
+    """Una fila entera de `projects`, tal como sale de `ruamel` al leer."""
+
+    project_id: str = Field(min_length=1)
+    safe_name: str = Field(min_length=1)
+    source_type: str = Field(min_length=1)
+    evidence_status: BulletEvidenceStatus
+    confidentiality: str = Field(min_length=1)
+    canonical_source: str = Field(min_length=1)
+    role_family_fit: tuple[str, ...] = ()
+    professional_value_signals: tuple[str, ...] = ()
+    cv_usage: ProjectCvUsage
+    interview_usage: ProjectCvUsage
+    pending_confirmations: tuple[str, ...] = ()
+
+
+class ProjectCatalog(BaseModel):
+    """La forma entera de `profile/project_catalog.yaml`."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    version: int = Field(ge=1)
+    updated_at: date
+    purpose: str = Field(min_length=1)
+    # Bloques fijos, sin editar: se transportan tal cual. `schema` es
+    # nombre reservado por `BaseModel` en Pydantic v2 (solo un aviso, no un
+    # error, pero uno evitable): se alía al nombre real del campo en el
+    # YAML y se acepta también por su nombre de atributo Python.
+    rules: dict[str, Any]
+    catalog_schema: dict[str, Any] = Field(alias="schema")
+    projects: tuple[Project, ...] = Field(min_length=1)
+    discovery_backlog: dict[str, Any]
+
+    @model_validator(mode="after")
+    def _sin_project_id_repetido(self) -> ProjectCatalog:
+        ids = [project.project_id for project in self.projects]
+        duplicated = sorted({pid for pid in ids if ids.count(pid) > 1})
+        if duplicated:
+            raise ValueError(
+                f"projects repite project_id {duplicated}; una referencia "
+                "desde professional_project_priority/public_project_priority "
+                "dejaría de ser inequívoca"
+            )
+        return self
+
+    @property
+    def project_id_set(self) -> frozenset[str]:
+        return frozenset(project.project_id for project in self.projects)

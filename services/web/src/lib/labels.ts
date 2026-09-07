@@ -141,6 +141,17 @@ export const BULLET_CV_USAGE_LABELS: Record<string, string> = {
 };
 
 /**
+ * `cv_usage`/`interview_usage` de un proyecto, Fase 2 M3. Vocabulario de
+ * código propio -`ProjectCvUsage`, distinto de `BulletCvUsage` aunque
+ * comparta nombre de campo-, así que lleva su propio mapa de etiquetas.
+ */
+export const PROJECT_CV_USAGE_LABELS: Record<string, string> = {
+  eligible: "elegible",
+  conditional: "condicional",
+  blocked: "bloqueado",
+};
+
+/**
  * Un identificador del repositorio de datos, legible.
  *
  * `career_capital_and_brand` → «Career capital and brand». No se traduce: el

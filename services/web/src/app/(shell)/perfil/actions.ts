@@ -3,21 +3,29 @@
 import {
   commitBulletBank,
   commitConstraints,
+  commitCvVariants,
   commitObjectives,
   commitPreferences,
+  commitProjectCatalog,
   commitRoleVariants,
   diffBulletBank,
   diffConstraints,
+  diffCvVariants,
   diffObjectives,
   diffPreferences,
+  diffProjectCatalog,
   diffRoleVariants,
+  type BaseVariantEdit,
   type BulletEdit,
   type DisqualifyingCondition,
   type EditableBulletBank,
   type EditableConstraints,
+  type EditableCvVariants,
   type EditableObjectives,
   type EditablePreferences,
+  type EditableProjectCatalog,
   type EditableRoleVariantContent,
+  type ProjectEdit,
   type SupersededDecision,
   type VariantContent,
 } from "@/lib/api";
@@ -37,6 +45,8 @@ export type PreferencesFormState = ObjectivesFormState;
 export type ConstraintsFormState = ObjectivesFormState;
 export type BulletBankFormState = ObjectivesFormState;
 export type RoleVariantsFormState = ObjectivesFormState;
+export type CvVariantsFormState = ObjectivesFormState;
+export type ProjectCatalogFormState = ObjectivesFormState;
 
 /** Texto separado por comas -> lista sin vacíos, mismo criterio en todos
  * los campos de este tipo (`success_dimensions`, `evidence`,
@@ -349,6 +359,85 @@ export async function reviewRoleVariants(
   }
 
   const result = await diffRoleVariants(edit);
+  if (!result.ok) {
+    return { error: result.detail, diff: null, saved: false, commitSha: null };
+  }
+  return { error: null, diff: result.data.diff, saved: false, commitSha: null };
+}
+
+/**
+ * `base_variants` viaja como JSON en un campo oculto -mismo criterio que
+ * `variants_json`-: un diccionario de variantes activas, ya mantenido como
+ * estado de React en `CvVariantsForm`. Las variantes con `status` no
+ * viajan: son de solo lectura, fuera de esta edición.
+ */
+function parseCvVariantsEdit(formData: FormData): EditableCvVariants {
+  const base_variants = JSON.parse(
+    String(formData.get("base_variants_json") ?? "{}"),
+  ) as Record<string, BaseVariantEdit>;
+  return { base_variants };
+}
+
+export async function reviewCvVariants(
+  _previous: CvVariantsFormState,
+  formData: FormData,
+): Promise<CvVariantsFormState> {
+  const intent = String(formData.get("intent") ?? "diff");
+  const edit = parseCvVariantsEdit(formData);
+
+  if (intent === "commit") {
+    const result = await commitCvVariants(edit);
+    if (!result.ok) {
+      return { error: result.detail, diff: null, saved: false, commitSha: null };
+    }
+    return {
+      error: null,
+      diff: result.data.diff,
+      saved: true,
+      commitSha: result.data.commit_sha,
+    };
+  }
+
+  const result = await diffCvVariants(edit);
+  if (!result.ok) {
+    return { error: result.detail, diff: null, saved: false, commitSha: null };
+  }
+  return { error: null, diff: result.data.diff, saved: false, commitSha: null };
+}
+
+/**
+ * `projects` viaja como JSON en un campo oculto -mismo criterio que
+ * `bullets_json`-: filas de largo fijo -sin alta ni baja en esta
+ * rebanada-, ya mantenidas como estado de React en `ProjectCatalogForm`.
+ */
+function parseProjectCatalogEdit(formData: FormData): EditableProjectCatalog {
+  const projects = JSON.parse(
+    String(formData.get("projects_json") ?? "[]"),
+  ) as ProjectEdit[];
+  return { projects };
+}
+
+export async function reviewProjectCatalog(
+  _previous: ProjectCatalogFormState,
+  formData: FormData,
+): Promise<ProjectCatalogFormState> {
+  const intent = String(formData.get("intent") ?? "diff");
+  const edit = parseProjectCatalogEdit(formData);
+
+  if (intent === "commit") {
+    const result = await commitProjectCatalog(edit);
+    if (!result.ok) {
+      return { error: result.detail, diff: null, saved: false, commitSha: null };
+    }
+    return {
+      error: null,
+      diff: result.data.diff,
+      saved: true,
+      commitSha: result.data.commit_sha,
+    };
+  }
+
+  const result = await diffProjectCatalog(edit);
   if (!result.ok) {
     return { error: result.detail, diff: null, saved: false, commitSha: null };
   }

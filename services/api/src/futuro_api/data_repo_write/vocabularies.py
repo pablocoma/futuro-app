@@ -15,6 +15,16 @@ ya documenta explícitamente para el mismo concepto
 `policy.default_cv_usage: blocked` y el valor real
 `eligible_with_internal_policy_check`- más `conditional`, que
 `project_catalog.yaml` usa para el mismo concepto con menos granularidad.
+
+Fase 2 M3 añade `ProjectCvUsage`, para `cv_usage`/`interview_usage` de
+`profile/project_catalog.yaml`. Investigado el 2026-09-07: ese fichero
+documenta su propio vocabulario para el mismo nombre de campo
+(`eligible_or_conditional_or_blocked`), distinto del de
+`BulletCvUsage` (`eligible_with_internal_policy_check`, no `eligible`) -
+son dos conceptos que comparten nombre de campo, no el mismo enum. En
+cambio `evidence_status` de un proyecto sí reutiliza `BulletEvidenceStatus`
+tal cual: mismos cuatro valores, y es precisamente el fichero del que M2
+los tomó.
 """
 
 from __future__ import annotations
@@ -33,3 +43,9 @@ class BulletCvUsage(StrEnum):
     BLOCKED = "blocked"
     CONDITIONAL = "conditional"
     ELIGIBLE_WITH_INTERNAL_POLICY_CHECK = "eligible_with_internal_policy_check"
+
+
+class ProjectCvUsage(StrEnum):
+    ELIGIBLE = "eligible"
+    CONDITIONAL = "conditional"
+    BLOCKED = "blocked"

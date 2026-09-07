@@ -728,3 +728,157 @@ export function commitRoleVariants(
 ): Promise<PostResult<RoleVariantContentCommit>> {
   return apiPost<RoleVariantContentCommit>("/api/profile/role-variants/commit", edit);
 }
+
+/**
+ * `config/cv_variants.yaml`, Fase 2 M3.
+ *
+ * `claim_rules`, `fixed_sections`, `tailorable_sections`,
+ * `vacancy_tailoring_process` y `strategy` son de solo lectura, sin ningún
+ * camino de edición -decidido con Pablo el 2026-09-07-. `base_variants`
+ * tiene 6 claves reales, solo 5 son editables: la que trae `status` en
+ * vez de las listas de prioridad (`quant_exploratory` en el repositorio
+ * real) queda de solo lectura, fuera del formulario. Las 5 activas
+ * comparten un núcleo editable; sus campos atípicos (`display_name`,
+ * `target_role_condition`, `note`, `exclusive_evidence`) son de solo
+ * lectura, mismo patrón que los campos no gestionados de `Bullet`.
+ */
+export type BaseVariantEdit = {
+  target_roles: string[];
+  emphasis: string[];
+  professional_project_priority: string[];
+  public_project_priority: string[];
+  candidate_bullet_priority: string[];
+};
+
+export type BaseVariant = {
+  target_roles: string[];
+  emphasis: string[];
+  professional_project_priority: string[];
+  public_project_priority: string[];
+  candidate_bullet_priority: string[];
+  display_name: string | null;
+  target_role_condition: string | null;
+  note: string | null;
+  exclusive_evidence: string[];
+  status: string | null;
+};
+
+export type CvVariants = {
+  version: number;
+  updated_at: string;
+  strategy: string;
+  /** Bloque fijo, sin editar. */
+  claim_rules: Record<string, unknown>;
+  tailorable_sections: string[];
+  fixed_sections: string[];
+  base_variants: Record<string, BaseVariant>;
+  vacancy_tailoring_process: string[];
+};
+
+export type EditableCvVariants = { base_variants: Record<string, BaseVariantEdit> };
+export type CvVariantsDiff = { diff: string; validated: CvVariants };
+export type CvVariantsCommit = { commit_sha: string; diff: string };
+
+export async function getCvVariants(): Promise<CvVariants | null> {
+  try {
+    const response = await fetch(`${API_INTERNAL_URL}/api/profile/cv-variants`, {
+      headers: await cookieHeaders(),
+      cache: "no-store",
+    });
+    if (!response.ok) return null;
+    return (await response.json()) as CvVariants;
+  } catch {
+    return null;
+  }
+}
+
+export function diffCvVariants(
+  edit: EditableCvVariants,
+): Promise<PostResult<CvVariantsDiff>> {
+  return apiPost<CvVariantsDiff>("/api/profile/cv-variants/diff", edit);
+}
+
+export function commitCvVariants(
+  edit: EditableCvVariants,
+): Promise<PostResult<CvVariantsCommit>> {
+  return apiPost<CvVariantsCommit>("/api/profile/cv-variants/commit", edit);
+}
+
+/**
+ * `profile/project_catalog.yaml`, Fase 2 M3. Primera vez que esta app lo
+ * lee o escribe.
+ *
+ * `project_id` casa cada edición, igual que `bullet_id` en M2. Sin alta ni
+ * baja: `discovery_backlog` y el resto de campos estructurales
+ * (`source_type`, `confidentiality`, `canonical_source`,
+ * `role_family_fit`, `professional_value_signals`) son de solo lectura.
+ *
+ * `evidence_status` reutiliza el mismo vocabulario que un bullet
+ * (`BulletEvidenceStatus`). `cv_usage`/`interview_usage` usan
+ * `ProjectCvUsage`, un vocabulario propio y distinto de `BulletCvUsage`
+ * aunque comparta nombre de campo.
+ */
+export type ProjectCvUsage = "eligible" | "conditional" | "blocked";
+
+export type Project = {
+  project_id: string;
+  safe_name: string;
+  source_type: string;
+  evidence_status: BulletEvidenceStatus;
+  confidentiality: string;
+  canonical_source: string;
+  role_family_fit: string[];
+  professional_value_signals: string[];
+  cv_usage: ProjectCvUsage;
+  interview_usage: ProjectCvUsage;
+  pending_confirmations: string[];
+};
+
+export type ProjectEdit = {
+  project_id: string;
+  safe_name: string;
+  evidence_status: BulletEvidenceStatus;
+  cv_usage: ProjectCvUsage;
+  interview_usage: ProjectCvUsage;
+  pending_confirmations: string[];
+};
+
+export type ProjectCatalog = {
+  version: number;
+  updated_at: string;
+  purpose: string;
+  /** Bloques fijos, sin editar. */
+  rules: Record<string, unknown>;
+  schema: Record<string, unknown>;
+  projects: Project[];
+  discovery_backlog: Record<string, unknown>;
+};
+
+export type EditableProjectCatalog = { projects: ProjectEdit[] };
+export type ProjectCatalogDiff = { diff: string; validated: ProjectCatalog };
+export type ProjectCatalogCommit = { commit_sha: string; diff: string };
+
+export async function getProjectCatalog(): Promise<ProjectCatalog | null> {
+  try {
+    const response = await fetch(`${API_INTERNAL_URL}/api/profile/project-catalog`, {
+      headers: await cookieHeaders(),
+      cache: "no-store",
+    });
+    if (!response.ok) return null;
+    return (await response.json()) as ProjectCatalog;
+  } catch {
+    return null;
+  }
+}
+
+export function diffProjectCatalog(
+  edit: EditableProjectCatalog,
+): Promise<PostResult<ProjectCatalogDiff>> {
+  return apiPost<ProjectCatalogDiff>("/api/profile/project-catalog/diff", edit);
+}
+
+export function commitProjectCatalog(
+  edit: EditableProjectCatalog,
+): Promise<PostResult<ProjectCatalogCommit>> {
+  return apiPost<ProjectCatalogCommit>("/api/profile/project-catalog/commit", edit);
+}

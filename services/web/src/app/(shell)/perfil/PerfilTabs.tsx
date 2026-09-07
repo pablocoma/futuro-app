@@ -5,18 +5,29 @@ import { useState } from "react";
 import type {
   BulletBank,
   Constraints,
+  CvVariants,
   Objectives,
   Preferences,
+  ProjectCatalog,
   RoleVariantContent,
 } from "@/lib/api";
 
 import { BulletBankForm } from "./BulletBankForm";
 import { ConstraintsForm } from "./ConstraintsForm";
+import { CvVariantsForm } from "./CvVariantsForm";
 import { ObjectivesForm } from "./ObjectivesForm";
 import { PreferencesForm } from "./PreferencesForm";
+import { ProjectCatalogForm } from "./ProjectCatalogForm";
 import { RoleVariantsForm } from "./RoleVariantsForm";
 
-type Tab = "objetivos" | "preferencias" | "restricciones" | "bullets" | "variantes";
+type Tab =
+  | "objetivos"
+  | "preferencias"
+  | "restricciones"
+  | "bullets"
+  | "variantes"
+  | "variantes_cv"
+  | "catalogo";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "objetivos", label: "Objetivos" },
@@ -24,10 +35,12 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "restricciones", label: "Restricciones" },
   { id: "bullets", label: "Bullets" },
   { id: "variantes", label: "Variantes de rol" },
+  { id: "variantes_cv", label: "Variantes de CV" },
+  { id: "catalogo", label: "Catálogo de proyectos" },
 ];
 
 /**
- * Las cinco vistas de `/perfil`, alternadas con un selector arriba sin
+ * Las siete vistas de `/perfil`, alternadas con un selector arriba sin
  * cambiar de URL -mismo patrón que `docs/APP_SCREENS.md` documenta para
  * Pipeline/CVs/Stats-. Cada pestaña es un fichero YAML distinto con su
  * propio ciclo diff/commit independiente; cambiar de pestaña no descarta
@@ -40,12 +53,16 @@ export function PerfilTabs({
   constraints,
   bulletBank,
   roleVariants,
+  cvVariants,
+  projectCatalog,
 }: {
   objectives: Objectives;
   preferences: Preferences;
   constraints: Constraints;
   bulletBank: BulletBank;
   roleVariants: RoleVariantContent;
+  cvVariants: CvVariants;
+  projectCatalog: ProjectCatalog;
 }) {
   const [tab, setTab] = useState<Tab>("objetivos");
 
@@ -68,6 +85,8 @@ export function PerfilTabs({
       {tab === "restricciones" && <ConstraintsForm current={constraints} />}
       {tab === "bullets" && <BulletBankForm current={bulletBank} />}
       {tab === "variantes" && <RoleVariantsForm current={roleVariants} />}
+      {tab === "variantes_cv" && <CvVariantsForm current={cvVariants} />}
+      {tab === "catalogo" && <ProjectCatalogForm current={projectCatalog} />}
     </div>
   );
 }

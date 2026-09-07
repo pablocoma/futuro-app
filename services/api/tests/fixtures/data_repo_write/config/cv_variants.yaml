@@ -1,12 +1,24 @@
 # cv_variants.yaml INVENTADO, para sembrar el remoto de git sintético de
 # data_repo_write. Nada de aquí sale del repositorio privado.
 #
-# Fase 2 M2 solo lee `claim_rules` de este fichero -no se edita hasta M3-,
-# así que el resto de claves aquí es un esqueleto plausible y no una
-# réplica del real.
+# Fase 2 M2 solo leía `claim_rules` de este fichero. Fase 2 M3 edita
+# `base_variants`: dos variantes activas, con sus campos atípicos
+# (`display_name`+`exclusive_evidence`+`note` en una,
+# `target_role_condition` en la otra) para ejercitar el paso de solo
+# lectura, y una tercera -`invented_variant_blocked`- con `status` en vez
+# de las listas de prioridad, para ejercitar la exclusión de
+# `quant_exploratory` sin depender de su nombre real. Las referencias de
+# `candidate_bullet_priority`/`exclusive_evidence` casan con
+# `cv/content/professional_bullet_bank.yaml`; las de
+# `professional_project_priority`/`public_project_priority`, con
+# `profile/project_catalog.yaml` -los tres ficheros de este fixture,
+# ampliados a la vez el 2026-09-07-.
 
 version: 1
 updated_at: 2026-01-01
+
+strategy: >-
+  Nota inventada de estrategia de variantes, para el fixture.
 
 claim_rules:
   final_cv_requires:
@@ -30,8 +42,35 @@ fixed_sections:
 
 base_variants:
   invented_variant_one:
+    display_name: Invented Variant One Display
     target_roles:
       - invented_role_one
+    emphasis:
+      - invented_emphasis_one
+    exclusive_evidence:
+      - invented_bullet_two
+    note: >-
+      Nota inventada de variante uno, para el fixture.
+    professional_project_priority:
+      - invented_project_professional
+    public_project_priority:
+      - invented_project_academic
+    candidate_bullet_priority:
+      - invented_bullet_one
   invented_variant_two:
+    target_role_condition: >-
+      Nota inventada de condición de rol objetivo, para el fixture.
     target_roles:
       - invented_role_two
+    emphasis:
+      - invented_emphasis_two
+    professional_project_priority:
+      - invented_project_professional
+    public_project_priority:
+      - invented_project_academic
+    candidate_bullet_priority:
+      - invented_bullet_two
+  invented_variant_blocked:
+    status: invented_blocked_status
+    target_roles:
+      - invented_role_blocked
