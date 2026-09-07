@@ -159,6 +159,11 @@ según `ARCHITECTURE.md` §11):
 | `APP_DOMAIN` | El dominio, para la comprobación de salud |
 | `DATA_REPO_DEPLOY_KEY` | Clave privada de solo lectura del repositorio de datos (ver §9) |
 
+**La deploy key de lectura-escritura de §10 no está en esta tabla, a
+propósito**: a diferencia de las demás, no la usa ningún workflow, así que
+no tiene sentido como secreto de GitHub Actions. Se aprovisiona a mano
+directamente en la VM, junto a `/opt/futuro/.env`.
+
 `DEPLOY_SSH_KNOWN_HOSTS` no es opcional: sin fijar la huella, el deploy
 confiaría en el primer servidor que respondiese.
 
@@ -224,6 +229,71 @@ escribe en `/opt/futuro`.
 **Sin este secreto, la comprobación previa falla con un mensaje claro**
 —el mismo patrón que los demás secretos de producción—, así que no hay
 manera de que un deploy llegue a medias por su ausencia.
+
+## 10. El clon de lectura-escritura del perfil (Fase 2, M0)
+
+Distinto en casi todo del de solo lectura de §9, y conviene tenerlo
+presente porque cambia el modelo de amenaza: aquella clave **vive y muere
+en el runner de GitHub Actions** y nunca toca la VM; esta **persiste en la
+VM**, porque la app tiene que poder `pull`/`commit`/`push` en cualquier
+momento futuro —cuando confirmes un cambio desde el navegador—, no solo
+durante un deploy. Es la consecuencia directa de que el mecanismo lo
+gestione la propia aplicación (`ARCHITECTURE.md` §5) y no un paso de CI, y
+es exactamente el riesgo que `ARCHITECTURE.md` §15 ya anotaba ("Deploy key
+con escritura filtrada"); la mitigación de esa fila —clave dedicada y
+revocable— sigue aplicando, solo que la clave ahora vive en disco y no
+solo en un secreto de GitHub Actions.
+
+**La deploy key es de lectura-escritura, y nunca pasa por GitHub
+Actions.** En GitHub, sobre `career-strategy`: *Settings → Deploy keys →
+Add deploy key*, esta vez **con** "Allow write access" marcado. La
+privada **no** entra como secreto del Environment `production`: se copia a
+mano a `/opt/futuro/data-repo-write.key` (permisos `600`, propietario el
+usuario de deploy), el mismo patrón que ya usa `/opt/futuro/.env` —"se
+escribe a mano una vez y no pasa nunca por CI"—, porque esta clave, a
+diferencia de las otras dos, tiene que estar ahí para que la app la use en
+cualquier petición futura, no una sola vez en un workflow.
+
+**El `known_hosts` de GitHub no es secreto y se commitea.**
+`services/api/git/github_known_hosts` trae las huellas SSH públicas de
+`github.com` (`https://api.github.com/meta`, `ssh_keys`, obtenidas el
+2026-09-06) y viaja con la imagen. Con `StrictHostKeyChecking=yes` en
+`GIT_SSH_COMMAND`, el clon falla en vez de preguntar de forma interactiva
+—imposible en un contenedor— si GitHub cambiara alguna vez su clave sin
+avisar.
+
+**Quién clona, y cuándo.** La propia app: si `/opt/futuro/data/repo-write`
+no es todavía un repositorio git, `data_repo_write/git_ops.py` lo clona la
+primera vez que algún endpoint de `/api/profile/*` lo necesita; si ya lo
+es, hace `pull --rebase` y sigue. **El deploy no lo toca en absoluto** —ni
+lo crea, ni lo refresca, ni lo borra—, a diferencia del `/opt/futuro/data/repo`
+de §9, que sí refresca en cada deploy. Es la razón de que sean dos
+directorios distintos y no el mismo con otro modo de montaje: si el
+deploy tocara este, un despliegue a mitad de una escritura podría machacar
+un commit todavía sin sincronizar, o pisar un `.git` a medio operar.
+
+**Dónde vive en la VM.** `/opt/futuro/data/repo-write`, un directorio
+plano —igual que el de §9— que `docker-compose.yml` monta **de
+lectura-escritura** en `api` (`DATA_REPO_WRITE_HOST_PATH`, con ese valor
+por omisión). Nunca en `worker`: las escrituras del perfil son
+síncronas dentro de la petición HTTP que confirma un cambio, no un
+trabajo de cola, así que no hay motivo para que el worker tenga la clave.
+
+**Provisionar, en orden:**
+
+1. `ssh-keygen -t ed25519 -f data-repo-write-deploy-key -C "futuro-app: perfil editable (Fase 2)"`.
+2. Añadir la pública como deploy key de `career-strategy` con escritura.
+3. Copiar la privada a `/opt/futuro/data-repo-write.key` en la VM, `chmod 600`.
+4. En `/opt/futuro/.env`: `DATA_REPO_WRITE_REMOTE=git@github.com:pablocoma/career-strategy.git`
+   (y `DATA_REPO_WRITE_KEY_HOST_PATH`/`DATA_REPO_WRITE_HOST_PATH` solo si
+   se quiere cambiar la ruta por omisión).
+5. `docker compose up -d api`: el primer `GET /api/profile/objectives`
+   clona.
+
+**Sin esta clave, `/api/profile/*` responde 503 con el motivo** —el mismo
+patrón que el resto de piezas opcionales de esta API—, así que no hay
+forma de que un deploy llegue a medias por su ausencia: el resto de la
+aplicación sigue funcionando igual que hoy.
 
 ## Riesgo conocido: el rollback no revierte migraciones
 

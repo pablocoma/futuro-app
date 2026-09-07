@@ -19,6 +19,14 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 WORKDIR /app
 
+# `git` y el cliente de SSH: Fase 2 gestiona su propio clon de
+# lectura-escritura del repositorio privado desde dentro de la propia app
+# (`data_repo_write/git_ops.py`), a diferencia del clon de solo lectura de
+# M3, que clona CI y nunca entra en esta imagen.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git openssh-client \
+    && rm -rf /var/lib/apt/lists/*
+
 # Las dependencias van en una capa propia, antes del código, para que
 # editar un módulo no invalide la instalación completa.
 COPY pyproject.toml uv.lock ./
@@ -26,6 +34,7 @@ RUN uv sync --frozen --no-dev --no-install-project
 
 COPY alembic.ini ./
 COPY migrations ./migrations
+COPY git ./git
 COPY src ./src
 RUN uv sync --frozen --no-dev
 

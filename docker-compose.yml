@@ -39,8 +39,18 @@ services:
     # docs/deployment.md); en local, docker-compose.override.yml sustituye
     # este volumen entero por el suyo con `!override`, así que esta ruta por
     # defecto no se usa nunca fuera de producción.
+    #
+    # El clon de lectura-escritura de Fase 2 es un volumen aparte y **no**
+    # de solo lectura: a diferencia del de arriba, no lo toca el deploy -lo
+    # clona y lo mantiene la propia app, ver `docs/deployment.md` §10-, así
+    # que sobrevive a cada `docker compose up` mientras el directorio del
+    # host no se borre. La clave privada se monta de solo lectura desde un
+    # fichero que se aprovisiona a mano en la VM, nunca desde un secreto de
+    # GitHub Actions -ver el porqué en `docs/deployment.md` §10-.
     volumes:
       - ${DATA_REPO_HOST_PATH:-/opt/futuro/data/repo}:/data/repo:ro
+      - ${DATA_REPO_WRITE_HOST_PATH:-/opt/futuro/data/repo-write}:/data/repo-write
+      - ${DATA_REPO_WRITE_KEY_HOST_PATH:-/opt/futuro/data-repo-write.key}:/run/secrets/data_repo_write_key:ro
     environment:
       ENV: ${ENV:-development}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
@@ -58,6 +68,11 @@ services:
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
       REDIS_URL: redis://redis:6379/0
       DATA_REPO_PATH: /data/repo
+      DATA_REPO_WRITE_PATH: /data/repo-write
+      DATA_REPO_WRITE_REMOTE: ${DATA_REPO_WRITE_REMOTE:-}
+      DATA_REPO_WRITE_BRANCH: ${DATA_REPO_WRITE_BRANCH:-dev}
+      DATA_REPO_WRITE_SSH_KEY_PATH: /run/secrets/data_repo_write_key
+      DATA_REPO_WRITE_KNOWN_HOSTS_PATH: /app/git/github_known_hosts
       LLM_PROVIDER: ${LLM_PROVIDER:-stub}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-}

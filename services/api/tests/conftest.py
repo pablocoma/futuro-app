@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shutil
 import subprocess
 import sys
 from collections.abc import AsyncIterator, Iterator
@@ -40,7 +41,50 @@ API_ROOT = Path(__file__).resolve().parent.parent
 # mínima—. Ver la cabecera de `fixtures/data_repo/config/scoring_model.yaml`.
 DATA_REPO = Path(__file__).resolve().parent / "fixtures" / "data_repo"
 
+# Igual de sintético, pero para el mecanismo de escritura: la forma
+# completa de `config/objectives.yaml` -las seis claves-, no solo lo que el
+# cargador de solo lectura toca. Ver su cabecera.
+DATA_REPO_WRITE_SEED = Path(__file__).resolve().parent / "fixtures" / "data_repo_write"
+
 ALLOWED = "allowed@example.test"
+
+
+def _run_git(cwd: Path, *args: str) -> None:
+    result = subprocess.run(
+        ["git", "-C", str(cwd), *args], capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def seed_bare_repo(tmp_path: Path, source: Path, *, branch: str = "dev") -> Path:
+    """Un repo bare en `branch`, sembrado con una copia de `source`.
+
+    No se puede commitear directamente a un bare: se siembra desde un
+    working dir temporal y se empuja una vez. Es el remoto de git de
+    verdad que `data_repo_write` necesita para probar `push` -un árbol de
+    ficheros sueltos no basta para probar una carrera ni un conflicto-.
+    """
+    bare = tmp_path / "remote.git"
+    _run_git(tmp_path, "init", "--bare", "-b", branch, str(bare))
+
+    seed = tmp_path / "seed"
+    shutil.copytree(source, seed)
+    _run_git(seed, "init", "-q", "-b", branch)
+    _run_git(seed, "add", "-A")
+    _run_git(
+        seed,
+        "-c",
+        "user.name=seed",
+        "-c",
+        "user.email=seed@test",
+        "commit",
+        "-q",
+        "-m",
+        "seed",
+    )
+    _run_git(seed, "remote", "add", "origin", str(bare))
+    _run_git(seed, "push", "-q", "origin", branch)
+    return bare
 
 
 def make_settings(**overrides: object) -> Settings:

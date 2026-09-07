@@ -18,6 +18,7 @@ from starlette.responses import Response
 
 from futuro_api import auth, db, health
 from futuro_api.config import Settings, get_settings
+from futuro_api.data_repo_write import router as profile_router
 from futuro_api.jobs import queue as job_queue
 from futuro_api.offers import router as offers_router
 
@@ -102,6 +103,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health.router)
     app.include_router(auth.router)
     app.include_router(offers_router.router)
+    app.include_router(profile_router.router)
     return app
 
 

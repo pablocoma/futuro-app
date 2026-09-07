@@ -4,13 +4,36 @@
 
 .DEFAULT_GOAL := help
 .PHONY: help up down logs ps rebuild shell-api shell-web psql migrate \
-        migrate-check check check-api check-web fmt e2e
+        migrate-check check check-api check-web fmt e2e seed-data-repo-write
 
 help: ## Lista los objetivos disponibles
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
 		| awk 'BEGIN {FS = ":.*?## "} {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
 
+# El remoto de git de Fase 2, en local: un bare en `.dev-data/`, gitignored,
+# que hace de "GitHub" para desarrollar el mecanismo de escritura sin tocar
+# el repositorio privado real ni una deploy key de verdad. Se siembra una
+# sola vez -si ya existe, no hace nada, igual que "clona una vez" hace la
+# propia app con su clon de trabajo-. Apuntar `DATA_REPO_WRITE_REMOTE` al
+# `Futuro` real es cosa de `.env`, igual que ya vale para `DATA_REPO_HOST_PATH`.
+seed-data-repo-write: ## Siembra el remoto de git local de Fase 2 (una vez)
+	@mkdir -p .dev-data/repo-write
+	@if [ ! -d .dev-data/repo-write-remote.git ]; then \
+		echo "→ sembrando .dev-data/repo-write-remote.git"; \
+		git init --quiet --bare -b dev .dev-data/repo-write-remote.git; \
+		tmp=$$(mktemp -d); \
+		cp -r services/api/tests/fixtures/data_repo_write/. "$$tmp/"; \
+		git -C "$$tmp" init --quiet -b dev; \
+		git -C "$$tmp" add -A; \
+		git -C "$$tmp" -c user.name=seed -c user.email=seed@local \
+			commit --quiet -m seed; \
+		git -C "$$tmp" remote add origin "$$(pwd)/.dev-data/repo-write-remote.git"; \
+		git -C "$$tmp" push --quiet origin dev; \
+		rm -rf "$$tmp"; \
+	fi
+
 up: ## Levanta la app en local y aplica las migraciones
+	$(MAKE) seed-data-repo-write
 	docker compose up --build -d --wait
 	# Las migraciones no se aplican solas al arrancar el contenedor: en
 	# producción es un paso del deploy, y aquí se hace explícito para que

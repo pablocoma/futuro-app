@@ -14,6 +14,7 @@ from typing import Literal
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from futuro_api.data_repo_write.git_ops import GitRemote
 from futuro_api.llm import cost
 
 Environment = Literal["development", "production"]
@@ -73,6 +74,26 @@ class Settings(BaseSettings):
     # motivo para arrancar sin él.
     data_repo_path: str = ""
 
+    # El clon de lectura-escritura de Fase 2, distinto del anterior en todo:
+    # lo gestiona la propia app -se clona una vez y se reutiliza, con
+    # `pull`/`commit`/`push` repetidos-, no un paso de CI, y su deploy key es
+    # de escritura y persiste donde corre la app, no en el runner de un
+    # despliegue. Vacío significa «sin mecanismo de escritura»: como con
+    # `data_repo_path` antes de M3, no es obligatorio con `ENV=production`
+    # todavía -la deploy key y el directorio en la VM son un aprovisionado a
+    # mano, posterior a este commit-, y lo único que falla sin él es
+    # escribir, con el motivo a la vista.
+    data_repo_write_path: str = ""
+    data_repo_write_remote: str = ""
+    data_repo_write_branch: str = "dev"
+    # Vacío en local: el remoto de `file://` que siembra `make
+    # seed-data-repo-write` no necesita SSH. En producción, la ruta al
+    # fichero de la clave -montado de solo lectura, nunca en el entorno- y
+    # al `known_hosts` de GitHub que se commitea con el código, porque no es
+    # secreto.
+    data_repo_write_ssh_key_path: str = ""
+    data_repo_write_known_hosts_path: str = ""
+
     # LLM. El valor por defecto es `stub` porque es el que hace que el
     # harness y el e2e funcionen sin clave y sin gastar: el CI no tiene
     # credenciales de OpenAI y no debería tenerlas. Que ese sea el valor por
@@ -104,6 +125,23 @@ class Settings(BaseSettings):
     def data_repo_root(self) -> Path | None:
         """La raíz del repositorio de datos, o `None` si no hay ninguno."""
         return Path(self.data_repo_path) if self.data_repo_path else None
+
+    @property
+    def data_repo_write_root(self) -> Path | None:
+        """El directorio del clon de lectura-escritura, o `None` sin él."""
+        return Path(self.data_repo_write_path) if self.data_repo_write_path else None
+
+    @property
+    def data_repo_write_remote_config(self) -> GitRemote | None:
+        """Cómo llegar al remoto de escritura, o `None` si falta algo."""
+        if not self.data_repo_write_path or not self.data_repo_write_remote:
+            return None
+        return GitRemote(
+            url=self.data_repo_write_remote,
+            branch=self.data_repo_write_branch,
+            ssh_key_path=self.data_repo_write_ssh_key_path,
+            known_hosts_path=self.data_repo_write_known_hosts_path,
+        )
 
     @property
     def llm_stubbed(self) -> bool:

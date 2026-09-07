@@ -102,6 +102,27 @@ export const MATCH_LABELS: Record<string, string> = {
 };
 
 /**
+ * Las familias de rol que `config/objectives.yaml` puede declarar. Es
+ * vocabulario de **código** -vive en `offers/vocabularies.py::RoleFamily`,
+ * no en el repositorio privado- así que sí se traduce aquí, con el mismo
+ * criterio que los cubos de cartera y los niveles de esfuerzo. Sin
+ * `other`: es el motivo de "esto no encaja en ningún objetivo", no algo
+ * que se declare como propio.
+ */
+export const ROLE_FAMILY_LABELS: Record<string, string> = {
+  ai_engineer: "Ingeniería de IA",
+  machine_learning_engineer: "Ingeniería de ML",
+  data_scientist: "Ciencia de datos",
+  data_ai_consultant: "Consultoría de datos/IA",
+  solutions_engineer: "Ingeniería de soluciones",
+  forward_deployed_engineer: "Ingeniería desplegada (forward-deployed)",
+  data_engineer: "Ingeniería de datos",
+  quantitative_roles: "Roles cuantitativos",
+};
+
+export const DECLARABLE_ROLE_FAMILIES = Object.keys(ROLE_FAMILY_LABELS);
+
+/**
  * Un identificador del repositorio de datos, legible.
  *
  * `career_capital_and_brand` → «Career capital and brand». No se traduce: el

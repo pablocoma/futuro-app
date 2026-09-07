@@ -1,0 +1,34 @@
+# Objetivos INVENTADOS, para sembrar el remoto de git sintético de
+# data_repo_write. Nada de aquí sale del repositorio privado.
+#
+# A diferencia de `tests/fixtures/data_repo/config/objectives.yaml` -que
+# solo lleva lo que el cargador de solo lectura toca-, este lleva las seis
+# claves completas: el modelo de escritura valida el fichero entero, no
+# solo `role_families.core`. Y sus familias son todas del `RoleFamily` de
+# verdad: a diferencia del lado de lectura, el modelo de escritura rechaza
+# un nombre que el código no conoce, así que aquí no vale colar uno
+# inventado para probar que "no molesta".
+
+version: 1
+updated_at: 2026-01-01
+
+transition:
+  target_year: 2030
+  urgency: low
+  expected_tenure_years: [2, 4]
+
+primary_objective:
+  statement: >-
+    Acumular ahorro y aprendizaje transferible durante unos años,
+    preservando la opción de volver más adelante.
+
+success_dimensions:
+  - net_savings
+  - transferable_learning
+
+role_families:
+  core:
+    - data_engineer
+    - data_scientist
+  exploratory:
+    - quantitative_roles

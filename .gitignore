@@ -12,6 +12,10 @@ __pycache__/
 # Docker / build
 *.log
 
+# El remoto de git local de Fase 2 (`make seed-data-repo-write`) y el clon
+# de trabajo de la app sobre él. Efímero y reproducible; no es dato real.
+.dev-data/
+
 # Frontend
 node_modules/
 .next/

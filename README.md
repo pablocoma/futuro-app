@@ -60,8 +60,15 @@ falla. Lo que hay que provisionar a mano —y las trampas que tiene— está en
 `docs/deployment.md`; los valores concretos viven en el repositorio
 privado, nunca aquí.
 
-Siguiente: Fase 2, perfil editable — la primera que escribe en el
-repositorio privado.
+En curso, Fase 2 — perfil editable, la primera que escribe en el
+repositorio privado, en cinco rebanadas (troceo en `NEXT_SESSION.md`). El
+shell mínimo (barra lateral/inferior con Pipeline, Capturar y Perfil) y M0
+—el mecanismo de escritura entero, demostrado sobre
+`config/objectives.yaml`: `pull --rebase`, `ruamel.yaml`, validación
+Pydantic, diff en pantalla, `commit`+`push` con autoría propia y
+conflicto sin forzar nada— están cerrados y verificados en esta máquina.
+Pendiente de aprovisionar a mano en producción: la deploy key de
+lectura-escritura (`docs/deployment.md` §10). Siguiente: M1.
 
 ## Desarrollo local
 
@@ -94,6 +101,14 @@ un clon nuevo puntúa una oferta de punta a punta sin tener el privado
 delante. Apuntarlo al de verdad es una línea en `.env`. Sin repositorio de
 datos la aplicación funciona igual y lo único que falla es puntuar, con el
 motivo a la vista en `/api/health` y en la pantalla.
+
+Para editar el perfil (`/perfil`, Fase 2), la aplicación necesita además
+su propio clon de **lectura-escritura**, distinto del anterior: `make up`
+lo siembra solo con `make seed-data-repo-write`, un repo bare local en
+`.dev-data/` que hace de "GitHub" en desarrollo, así que tampoco hace
+falta una deploy key real ni tocar el repositorio privado para probar el
+mecanismo. Apuntar al `Futuro` real es `DATA_REPO_WRITE_REMOTE` en
+`.env`, con su propia clave montada a mano (`docker-compose.override.yml`).
 
 Para repuntuar el histórico entero tras cambiar el modelo de scoring, sin
 llamar al modelo:

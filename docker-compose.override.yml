@@ -40,15 +40,30 @@ services:
     # `!override` y no añadir: `docker-compose.yml` ya monta un
     # `/data/repo` propio (el clon de producción), y sumarse dejaría dos
     # montajes peleándose por la misma ruta dentro del contenedor.
+    #
+    # El clon de lectura-escritura en local: `/data/repo-write` es donde la
+    # propia app clona y opera -vacío al principio, sobrevive a
+    # `docker compose restart` porque es un bind mount-, y
+    # `/data/repo-write-remote.git` es un bare local que hace de "GitHub"
+    # para desarrollar sin tocar el repositorio privado real ni gastar una
+    # deploy key. Lo siembra `make seed-data-repo-write` (enganchado a
+    # `make up`); ver su cabecera en el `Makefile`.
     volumes: !override
       # Solo el código: .venv se queda la del contenedor, que es la que
       # coincide con uv.lock para linux/arm64.
       - ./services/api/src:/app/src
       - ./services/api/migrations:/app/migrations
       - ${DATA_REPO_HOST_PATH:-./services/api/tests/fixtures/data_repo}:/data/repo:ro
+      - ${DATA_REPO_WRITE_HOST_PATH:-./.dev-data/repo-write}:/data/repo-write
+      - ${DATA_REPO_WRITE_REMOTE_HOST_PATH:-./.dev-data/repo-write-remote.git}:/data/repo-write-remote.git
     environment:
       ENV: development
       LOG_LEVEL: DEBUG
+      # Por omisión, el bare local sin SSH. Apuntar al `Futuro` real exige
+      # además montar tu propia clave -no está enganchado aquí a propósito,
+      # es un paso manual, ver docs/deployment.md §10-.
+      DATA_REPO_WRITE_REMOTE: ${DATA_REPO_WRITE_REMOTE:-/data/repo-write-remote.git}
+      DATA_REPO_WRITE_SSH_KEY_PATH: ${DATA_REPO_WRITE_SSH_KEY_PATH:-}
     ports:
       - "8000:8000"
 

@@ -378,3 +378,61 @@ export function confirmVariant(
 ): Promise<PostResult<Application>> {
   return apiPost<Application>(`/api/offers/${id}/dossier`, { variant });
 }
+
+/**
+ * `config/objectives.yaml` del repositorio privado, Fase 2 M0.
+ *
+ * `version` no se edita desde el formulario -no hay ninguna regla de
+ * cuándo subirla- y `updated_at` lo estampa el propio backend con la
+ * fecha de la escritura, así que los dos viajan de vuelta pero ninguno se
+ * manda al editar.
+ */
+export type Objectives = {
+  version: number;
+  updated_at: string;
+  transition: {
+    target_year: number;
+    urgency: string;
+    expected_tenure_years: [number, number];
+  };
+  primary_objective: { statement: string };
+  success_dimensions: string[];
+  role_families: { core: string[]; exploratory: string[] };
+};
+
+export type EditableObjectives = Omit<Objectives, "version" | "updated_at">;
+
+export type ObjectivesDiff = { diff: string; validated: Objectives };
+export type ObjectivesCommit = { commit_sha: string; diff: string };
+
+/**
+ * No reutiliza `apiGet`: ese helper deja pasar un 503 y lo parsea igual
+ * -pensado para `/api/health`, cuyo cuerpo en 503 tiene la misma forma que
+ * en 200-. Aquí un 503 significa «el mecanismo de escritura no está
+ * configurado» y su cuerpo es `{detail}`, no un `Objectives`; tratarlo
+ * igual que cualquier otro fallo y devolver `null` es lo correcto.
+ */
+export async function getObjectives(): Promise<Objectives | null> {
+  try {
+    const response = await fetch(`${API_INTERNAL_URL}/api/profile/objectives`, {
+      headers: await cookieHeaders(),
+      cache: "no-store",
+    });
+    if (!response.ok) return null;
+    return (await response.json()) as Objectives;
+  } catch {
+    return null;
+  }
+}
+
+export function diffObjectives(
+  edit: EditableObjectives,
+): Promise<PostResult<ObjectivesDiff>> {
+  return apiPost<ObjectivesDiff>("/api/profile/objectives/diff", edit);
+}
+
+export function commitObjectives(
+  edit: EditableObjectives,
+): Promise<PostResult<ObjectivesCommit>> {
+  return apiPost<ObjectivesCommit>("/api/profile/objectives/commit", edit);
+}

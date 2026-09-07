@@ -1,9 +1,10 @@
 # Traspaso a la siguiente sesión
 
-Última actualización: 2026-09-06. M3 cerrada, desplegada y verificada el
-2026-09-05: `/api/health` en `data_repo: ok` en producción y una oferta
-puntuada de verdad ese mismo día. **Fase 1 completa de punta a punta**, no
-solo en código. Fase 2 troceada en cinco rebanadas — ver más abajo.
+Última actualización: 2026-09-06. Fase 1 completa de punta a punta (M0-M3,
+desplegada el 2026-09-05). Fase 2 arrancó el mismo 2026-09-06: shell
+mínimo y M0 (el mecanismo de escritura, sobre `config/objectives.yaml`)
+cerrados y verificados en esta máquina el mismo día — ver más abajo. M1 es
+el siguiente objetivo.
 
 Este archivo contiene el estado operativo del proyecto. Las reglas duraderas
 están en `AGENTS.md`; no deben duplicarse aquí.
@@ -432,7 +433,7 @@ no hay milestone asignado todavía), su test entra en el mismo commit que su
 código, y debe leer primero `docs/APP_SCREENS.md` §"Estructura del shell"
 del repositorio privado.
 
-## Siguiente objetivo: Fase 2 — perfil editable
+## Fase 2 — perfil editable (en curso)
 
 Es la primera fase que **escribe** en el repositorio privado `Futuro`
 (repositorio de GitHub `career-strategy`), con la mecánica de `pull
@@ -452,25 +453,54 @@ razonable ajustar el troceo si al llegar a una rebanada concreta la
 realidad no encaja con lo previsto — no es un contrato inamovible, es la
 mejor previsión con la información de hoy.
 
-- **M0 — El mecanismo de escritura, sobre el YAML más simple que hay:
-  `config/objectives.yaml`** (32 líneas, 6 claves, sin anidar). El objetivo
-  de esta rebanada es demostrar el mecanismo entero —no la complejidad de
-  ningún fichero en concreto—: `pull --rebase`, cargar con `ruamel.yaml`
-  (round-trip, conserva comentarios y orden), validar contra un modelo
-  Pydantic nuevo, enseñar el diff, confirmar, `commit` con autoría `Futuro
-  App <bot@futuro.local>`, `push`, y mostrar el conflicto sin forzar nada
-  si lo hay.
+### Shell mínimo y M0 — cerrados el 2026-09-06
 
-  **Primera decisión de diseño de M0, antes de escribir código:** el clon
-  de M3 es de solo lectura y CI lo **refresca por `rsync` en cada
-  deploy**—reutilizarlo para escritura viva sería peligroso, un despliegue
-  a mitad de una escritura podría machacar un commit todavía sin
-  sincronizar, o pisar un `.git` a medio operar—. Fase 2 necesita su
-  **propio clon**, gestionado por la propia aplicación y no por CI (se
-  clona una vez y luego se hace `pull`/`commit`/`push` repetidos sobre él),
-  con una deploy key **de lectura-escritura**, distinta de la de solo
-  lectura de M3 y de la de despliegue. Proponer ese diseño y esperar el visto
-  bueno antes de tocar código es el mismo patrón que ya funcionó para M3.
+Antes de M0 se construyó el shell mínimo que `NEXT_SESSION.md` había
+dejado pendiente de decidir: barra lateral en escritorio y barra inferior
+en móvil, con solo las tres entradas que hoy tienen pantalla real
+—Pipeline, Capturar, Perfil—; Hoy, Oferta suelta, CVs y Stats quedan fuera
+hasta que su fase construya la pantalla detrás. `/` (la portada de M0 de
+Fase 1) se queda fuera del shell, accesible por URL directa. El porqué de
+cada recorte de alcance está en `docs/decisions/fase-2-perfil-editable.md`.
+
+M0 entrega el mecanismo de escritura completo, demostrado sobre
+`config/objectives.yaml`: `futuro_api/data_repo_write/` con `git_ops.py`
+(clonar una vez, `pull --rebase`, commitear con autoría `Futuro App
+<bot@futuro.local>`, `push`, conflicto sin forzar nada, genérico y
+reutilizable por M1-M4) y `objectives.py` (lo único que sabe que ese
+fichero existe: carga con `ruamel.yaml` en modo *round-trip*, aplica una
+edición, valida contra un modelo Pydantic nuevo, calcula el diff). Dos
+endpoints —`POST /api/profile/objectives/diff` y `.../commit`, cada uno
+repitiendo pull→carga→aplica→valida desde cero— y la pantalla `/perfil`
+dentro del shell, con el formulario, el diff y la confirmación.
+
+El clon de lectura-escritura es **propio de la app**, no el de M3: vive en
+`/opt/futuro/data/repo-write` (local: `.dev-data/repo-write`, gestionado
+por `make seed-data-repo-write`, enganchado a `make up`, contra un bare
+local y no contra GitHub), con una deploy key de lectura-escritura nueva
+que **persiste en la VM** —a diferencia de las otras dos, que viven solo
+en el runner de un deploy—, porque la app tiene que poder escribir en
+cualquier momento futuro. El procedimiento de aprovisionar está en
+`docs/deployment.md` §10; **pendiente de que Pablo lo ejecute** antes de
+llevar Fase 2 a producción, no bloqueante para seguir con M1 en código.
+
+Dos hallazgos de React/Next.js que costaron tiempo y quedan documentados
+en `docs/decisions/fase-2-perfil-editable.md` para no repetirlos en
+M1-M4: un fichero `"use server"` solo puede exportar funciones async, y
+React resetea los campos **no controlados** de un formulario en cuanto su
+`action` termina —hay que usar campos controlados cuando el formulario
+tiene que sobrevivir a una acción intermedia, como el paso de "ver diff"
+antes de confirmar—.
+
+Verificado en esta máquina el 2026-09-06: `make check` limpio (336 tests
+API, 17 web), `make e2e` con los 17 tests en verde incluido el recorrido
+nuevo de `perfil.spec.ts`, y el recorrido completo repetido a mano contra
+el stack de Compose real —clon en frío, `GET`/`diff`/`commit` por `curl` y
+desde el navegador, commit real en el remoto local con la autoría
+correcta—. El detalle completo está en
+`docs/decisions/fase-2-perfil-editable.md`.
+
+## Siguiente objetivo: Fase 2 · M1
 
 - **M1 — Extender a `config/preferences.yaml`** (68 líneas, 9 claves) **y
   `config/constraints.yaml`** (60 líneas, con `pending_decisions` y
@@ -529,10 +559,9 @@ Claude Code.** La sesión que cerró la Fase 1 entera —M3, el despliegue, el
 arreglo de `dev`/`main`, y encima el hallazgo de diseño del shell— se hizo
 larguísima. A partir de aquí: rebanadas en serie, cada una de punta a
 punta, cada una en su propia sesión nueva; con su propia entrada (o
-ampliación) en `docs/decisions/fase-2-perfil-editable.md` al cerrarla —no
-antes: ese fichero no existe todavía a propósito, se crea al cerrar M0—, y
+ampliación) en `docs/decisions/fase-2-perfil-editable.md` al cerrarla, y
 `NEXT_SESSION.md` reescrito con el estado comprobado antes de cerrar la
 sesión, para que la siguiente pueda arrancar solo con leer este archivo.
-Empezar cada rebanada (y en particular M0) proponiendo el diseño y
-esperando el visto bueno antes de escribir código, como ya funcionó para
-M3.
+Empezar cada rebanada proponiendo el diseño y esperando el visto bueno
+antes de escribir código —el mismo patrón que ya funcionó para M3 y para
+el shell mínimo + M0—.
