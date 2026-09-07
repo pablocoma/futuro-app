@@ -11,9 +11,11 @@ que el resto de la aplicación lee hoy-.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import date
+from typing import Any
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from futuro_api.offers.vocabularies import RoleFamily
 
@@ -101,4 +103,213 @@ class Objectives(EditableObjectives):
     # YAML sin comillas lo lee como fecha, no como texto: `ruamel` lo carga
     # como `datetime.date` y hay que fecharlo de vuelta con lo mismo, no con
     # un string, para que se escriba sin comillas igual que estaba.
+    updated_at: date
+
+
+# ---------------------------------------------------------------------------
+# `config/preferences.yaml` -- Fase 2 M1
+#
+# Ninguna de sus nueve claves es vocabulario de código: a diferencia de
+# `role_families`, nada de este fichero se compara contra un enum en ningún
+# sitio de `services/api/src` (comprobado por grep antes de escribir este
+# módulo). Todo es texto y número libres, así que no hay ninguna puerta de
+# vocabulario que añadir aquí, a diferencia de `RoleFamilies` arriba.
+# ---------------------------------------------------------------------------
+
+
+class WorkContent(BaseModel):
+    preference: str = Field(min_length=1)
+    avoid_narrow_specialization: bool
+    client_facing: str = Field(min_length=1)
+    programming: str = Field(min_length=1)
+    travel: str = Field(min_length=1)
+
+
+class WorkIntensity(BaseModel):
+    willing_to_accept_high_intensity: bool
+    intended_duration_years: tuple[int, int]
+    condition: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _rango_creciente(self) -> WorkIntensity:
+        low, high = self.intended_duration_years
+        if low > high:
+            raise ValueError(
+                "intended_duration_years debe ir de menor a mayor: "
+                f"[{low}, {high}] no lo es"
+            )
+        return self
+
+
+class WorkMode(BaseModel):
+    onsite: str = Field(min_length=1)
+    hybrid: str = Field(min_length=1)
+    remote: str = Field(min_length=1)
+
+
+class Geography(BaseModel):
+    eu_passport: bool
+    visa_sponsorship: str = Field(min_length=1)
+    countries: str = Field(min_length=1)
+    madrid_advantage: str = Field(min_length=1)
+
+
+class Compensation(BaseModel):
+    spain_minimum_gross_eur: int = Field(ge=0)
+    current_madrid_gross_eur: int = Field(ge=0)
+    current_madrid_net_monthly_eur: int = Field(ge=0)
+    current_madrid_payments_per_year: int = Field(ge=1)
+    current_living_costs_monthly_eur: tuple[int, int]
+    current_annual_savings_eur: int = Field(ge=0)
+    savings_baseline_note: str = Field(min_length=1)
+    abroad_housing_assumption: str = Field(min_length=1)
+    outside_madrid_rule: str = Field(min_length=1)
+    international_targets: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _rango_creciente(self) -> Compensation:
+        low, high = self.current_living_costs_monthly_eur
+        if low > high:
+            raise ValueError(
+                "current_living_costs_monthly_eur debe ir de menor a mayor: "
+                f"[{low}, {high}] no lo es"
+            )
+        return self
+
+
+class Language(BaseModel):
+    spanish: str = Field(min_length=1)
+    english_interview: str = Field(min_length=1)
+    evidence: tuple[str, ...] = ()
+    cv_policy: str = Field(min_length=1)
+
+
+class ProfessionalProjectDocumentation(BaseModel):
+    contribution_granularity: str = Field(min_length=1)
+    avoid_internal_task_breakdown: bool
+    acceptable_evidence: str = Field(min_length=1)
+    cv_implication: str = Field(min_length=1)
+
+
+class EditablePreferences(BaseModel):
+    work_content: WorkContent
+    work_intensity: WorkIntensity
+    work_mode: WorkMode
+    geography: Geography
+    compensation: Compensation
+    language: Language
+    professional_project_documentation: ProfessionalProjectDocumentation
+
+
+class Preferences(EditablePreferences):
+    """La forma entera de `config/preferences.yaml`, las nueve claves."""
+
+    version: int = Field(ge=1)
+    updated_at: date
+
+
+# ---------------------------------------------------------------------------
+# `config/constraints.yaml` -- Fase 2 M1
+# ---------------------------------------------------------------------------
+
+
+class CurrentKnownConstraints(BaseModel):
+    timing: str = Field(min_length=1)
+    spain_salary_floor_gross_eur: int = Field(ge=0)
+    relocation: str = Field(min_length=1)
+    visa_sponsorship: str = Field(min_length=1)
+    eu_work_authorization: bool
+
+
+class SectorPolicy(BaseModel):
+    excluded_industries: tuple[str, ...] = ()
+    rule: str = Field(min_length=1)
+    note: str = Field(min_length=1)
+
+
+class DisqualifyingConditionEdit(BaseModel):
+    """Una fila de `disqualifying_conditions`. Solo `id` y `rule`: son los
+    dos únicos campos que `data_repo/loader.py` lee del lado de solo
+    lectura -el resto (`evaluable_from_posting`/`affects`, distinto por
+    fila) no lo consume ningún código, así que se enseña de solo lectura
+    junto a cada fila y no se toca desde aquí.
+
+    A diferencia de `role_families`, `id` no es vocabulario de código: no
+    se compara contra ningún enum en ningún sitio, solo viaja como texto
+    libre hasta el prompt del modelo (`assessment/prompt.py`). Alcance de
+    esta rebanada: añadir filas y editar su `rule`, sin borrar ni
+    reordenar -confirmado con Pablo el 2026-09-07-.
+    """
+
+    id: str = Field(min_length=1)
+    rule: str = Field(min_length=1)
+
+
+class AcceptedConditions(BaseModel):
+    on_call_and_shift_work: str = Field(min_length=1)
+    high_intensity: str = Field(min_length=1)
+
+
+class SupersededDecisionEdit(BaseModel):
+    """Una entrada de `superseded_decisions`, que en el YAML es un mapa de
+    clave -> texto y no una lista: aquí se transporta como lista ordenada
+    de pares para que el formulario pueda añadir, editar y borrar entradas
+    con CRUD completo -decidido con Pablo el 2026-09-07-, y `constraints.py`
+    la reconstruye como mapa al escribir."""
+
+    key: str = Field(min_length=1)
+    text: str = Field(min_length=1)
+
+
+class EditableConstraints(BaseModel):
+    # Editable, a diferencia de `fixed_sections` en `cv_variants.yaml`:
+    # decidido con Pablo el 2026-09-07 confiar en que sabe lo que hace al
+    # tocar sus propias líneas rojas éticas. `min_length=1` solo protege
+    # contra vaciar la lista entera por accidente, no restringe qué se
+    # puede escribir en ella.
+    hard_constraints: tuple[str, ...] = Field(min_length=1)
+    current_known_constraints: CurrentKnownConstraints
+    sector_policy: SectorPolicy
+    disqualifying_conditions: tuple[DisqualifyingConditionEdit, ...] = Field(
+        min_length=1
+    )
+    accepted_conditions: AcceptedConditions
+    pending_decisions: tuple[str, ...] = ()
+    superseded_decisions: tuple[SupersededDecisionEdit, ...] = ()
+
+    @field_validator("superseded_decisions", mode="before")
+    @classmethod
+    def _superseded_decisions_desde_el_mapa_del_yaml(cls, value: Any) -> Any:
+        """El YAML real declara `superseded_decisions` como un mapa de
+        clave -> texto, no como lista -a diferencia de lo que asumía el
+        troceo original de esta rebanada-. `current()` valida el
+        documento tal cual sale de `ruamel` (un `CommentedMap`), y el
+        formulario edita y manda la lista de pares que sí es
+        `SupersededDecisionEdit`; aquí se acepta la primera forma y se
+        convierte a la segunda, preservando el orden de inserción."""
+        if isinstance(value, Mapping):
+            return [{"key": key, "text": text} for key, text in value.items()]
+        return value
+
+    @model_validator(mode="after")
+    def _condiciones_sin_id_repetido(self) -> EditableConstraints:
+        ids = [condition.id for condition in self.disqualifying_conditions]
+        duplicated = sorted({cid for cid in ids if ids.count(cid) > 1})
+        if duplicated:
+            raise ValueError(f"disqualifying_conditions repite id {duplicated}")
+        return self
+
+    @model_validator(mode="after")
+    def _decisiones_sustituidas_sin_clave_repetida(self) -> EditableConstraints:
+        keys = [decision.key for decision in self.superseded_decisions]
+        duplicated = sorted({key for key in keys if keys.count(key) > 1})
+        if duplicated:
+            raise ValueError(f"superseded_decisions repite clave {duplicated}")
+        return self
+
+
+class Constraints(EditableConstraints):
+    """La forma entera de `config/constraints.yaml`, las nueve claves."""
+
+    version: int = Field(ge=1)
     updated_at: date

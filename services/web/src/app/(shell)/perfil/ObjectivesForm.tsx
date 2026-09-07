@@ -82,6 +82,13 @@ export function ObjectivesForm({ current }: { current: Objectives }) {
 
   return (
     <form action={action} className="space-y-8">
+      <header className="space-y-1">
+        <h2 className="text-2xl font-semibold tracking-tight">Objetivos</h2>
+        <p className="text-sm text-ink2">
+          Versión {current.version} · actualizado el {current.updated_at}
+        </p>
+      </header>
+
       <section className="space-y-4">
         <h2 className="font-mono text-xs uppercase tracking-widest text-ink3">
           Transición

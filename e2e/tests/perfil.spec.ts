@@ -46,3 +46,99 @@ test("editar el objetivo, ver el diff sin escribir, y confirmar lo escribe y emp
   await page.reload();
   await expect(page.getByLabel("Declaración")).toHaveValue(declaracion);
 });
+
+/**
+ * M1: `preferences.yaml` y `constraints.yaml`, alternados con las
+ * pestañas de `PerfilTabs` sin cambiar de URL. Cada bloque prueba su
+ * propio fichero de punta a punta, mismo patrón que M0 arriba.
+ */
+
+test("las tres pestañas de Perfil alternan de fichero sin cambiar de URL", async ({
+  page,
+}) => {
+  await page.goto("/perfil");
+  await expect(page.getByRole("heading", { name: "Objetivos" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Preferencias" }).click();
+  await expect(page.getByRole("heading", { name: "Preferencias" })).toBeVisible();
+  await expect(page).toHaveURL(/\/perfil$/);
+
+  await page.getByRole("button", { name: "Restricciones" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Restricciones", exact: true }),
+  ).toBeVisible();
+  await expect(page).toHaveURL(/\/perfil$/);
+
+  await page.getByRole("button", { name: "Objetivos" }).click();
+  await expect(page.getByRole("heading", { name: "Objetivos" })).toBeVisible();
+});
+
+test("editar una preferencia, ver el diff sin escribir, y confirmar lo escribe y empuja", async ({
+  page,
+}) => {
+  const marca = `e2e-${Date.now()}`;
+  const condicion = `Condición de prueba ${marca}.`;
+
+  await page.goto("/perfil");
+  await page.getByRole("button", { name: "Preferencias" }).click();
+  await expect(page.getByRole("heading", { name: "Preferencias" })).toBeVisible();
+
+  await page.getByLabel("Condición").fill(condicion);
+  await page.getByRole("button", { name: "Ver cambios" }).click();
+
+  const diff = page.locator("pre");
+  await expect(diff).toBeVisible();
+  await expect(diff).toContainText(condicion);
+
+  await page.getByRole("button", { name: "Confirmar y guardar" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Escrito y empujado" }),
+  ).toBeVisible();
+
+  await page.reload();
+  await page.getByRole("button", { name: "Preferencias" }).click();
+  await expect(page.getByLabel("Condición")).toHaveValue(condicion);
+});
+
+test("añadir una condición descalificante y una decisión sustituida, ver el diff, y confirmar", async ({
+  page,
+}) => {
+  const marca = `e2e-${Date.now()}`;
+  const nuevoId = `condicion_${marca}`;
+  const nuevaRegla = `Regla añadida por e2e ${marca}.`;
+  const nuevaClave = `decision_${marca}`;
+  const nuevoTexto = `Decisión sustituida añadida por e2e ${marca}.`;
+
+  await page.goto("/perfil");
+  await page.getByRole("button", { name: "Restricciones" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Restricciones", exact: true }),
+  ).toBeVisible();
+
+  await page.getByPlaceholder("identificador").fill(nuevoId);
+  await page.getByPlaceholder("regla").fill(nuevaRegla);
+  await page.getByRole("button", { name: "+ Añadir condición" }).click();
+
+  // La fila existente del fixture ya lleva el mismo placeholder: la nueva
+  // se añade al final, así que se rellena por posición.
+  await page.getByRole("button", { name: "+ Añadir decisión sustituida" }).click();
+  await page.getByPlaceholder("clave").last().fill(nuevaClave);
+  await page.getByPlaceholder("texto").last().fill(nuevoTexto);
+
+  await page.getByRole("button", { name: "Ver cambios" }).click();
+  const diff = page.locator("pre");
+  await expect(diff).toBeVisible();
+  await expect(diff).toContainText(nuevoId);
+  await expect(diff).toContainText(nuevaClave);
+
+  await page.getByRole("button", { name: "Confirmar y guardar" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Escrito y empujado" }),
+  ).toBeVisible();
+
+  // Y de verdad quedó escrito: recargar trae la fila y la decisión nuevas.
+  await page.reload();
+  await page.getByRole("button", { name: "Restricciones" }).click();
+  await expect(page.getByText(nuevoId)).toBeVisible();
+  await expect(page.getByPlaceholder("clave").last()).toHaveValue(nuevaClave);
+});

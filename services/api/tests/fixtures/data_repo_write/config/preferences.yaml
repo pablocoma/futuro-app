@@ -1,0 +1,64 @@
+# Preferencias INVENTADAS, para sembrar el remoto de git sintético de
+# data_repo_write. Nada de aquí sale del repositorio privado.
+#
+# Mismas nueve claves que el `preferences.yaml` real -comprobado contra el
+# repositorio privado el 2026-09-07-, con valores inventados.
+
+version: 1
+updated_at: 2026-01-01
+
+work_content:
+  preference: broad_and_varied
+  avoid_narrow_specialization: true
+  client_facing: acceptable
+  programming: acceptable
+  travel: acceptable
+
+work_intensity:
+  willing_to_accept_high_intensity: true
+  intended_duration_years: [2, 4]
+  condition: >-
+    La intensidad debe compensarse con ahorro, marca o aprendizaje
+    excepcional. Texto inventado para el fixture.
+
+work_mode:
+  onsite: accepted
+  hybrid: accepted
+  remote: accepted
+
+geography:
+  eu_passport: true
+  visa_sponsorship: accepted
+  countries: pending_research
+  madrid_advantage: no_rent
+
+compensation:
+  spain_minimum_gross_eur: 30000
+  current_madrid_gross_eur: 24000
+  current_madrid_net_monthly_eur: 1500
+  current_madrid_payments_per_year: 12
+  current_living_costs_monthly_eur: [300, 400]
+  current_annual_savings_eur: 12000
+  savings_baseline_note: >-
+    Cifra y explicación inventadas para el fixture, no un dato real.
+  abroad_housing_assumption: >-
+    Alquilaría barato si se mudara: supuesto inventado para el fixture.
+  outside_madrid_rule: >-
+    Debe superar el coste incremental de mudarse: regla inventada.
+  international_targets: pending_cost_of_living_analysis
+
+language:
+  spanish: native
+  english_interview: functional
+  evidence:
+    - invented_evidence_entry
+  cv_policy: >-
+    Política inventada para el fixture, no un dato real.
+
+professional_project_documentation:
+  contribution_granularity: aggregate
+  avoid_internal_task_breakdown: true
+  acceptable_evidence: >-
+    Descripción inventada de evidencia aceptable para el fixture.
+  cv_implication: >-
+    Implicación inventada para el CV, dato de prueba.

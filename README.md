@@ -62,13 +62,15 @@ privado, nunca aquí.
 
 En curso, Fase 2 — perfil editable, la primera que escribe en el
 repositorio privado, en cinco rebanadas (troceo en `NEXT_SESSION.md`). El
-shell mínimo (barra lateral/inferior con Pipeline, Capturar y Perfil) y M0
+shell mínimo (barra lateral/inferior con Pipeline, Capturar y Perfil), M0
 —el mecanismo de escritura entero, demostrado sobre
 `config/objectives.yaml`: `pull --rebase`, `ruamel.yaml`, validación
 Pydantic, diff en pantalla, `commit`+`push` con autoría propia y
-conflicto sin forzar nada— están cerrados y verificados en esta máquina.
-Pendiente de aprovisionar a mano en producción: la deploy key de
-lectura-escritura (`docs/deployment.md` §10). Siguiente: M1.
+conflicto sin forzar nada— y M1 —el mismo mecanismo generalizado a
+`config/preferences.yaml` y `config/constraints.yaml`, con `/perfil` ya en
+tres pestañas— están cerrados y verificados en esta máquina. Pendiente de
+aprovisionar a mano en producción: la deploy key de lectura-escritura
+(`docs/deployment.md` §10). Siguiente: M2.
 
 ## Desarrollo local
 

@@ -1,10 +1,10 @@
 # Traspaso a la siguiente sesión
 
-Última actualización: 2026-09-06. Fase 1 completa de punta a punta (M0-M3,
-desplegada el 2026-09-05). Fase 2 arrancó el mismo 2026-09-06: shell
-mínimo y M0 (el mecanismo de escritura, sobre `config/objectives.yaml`)
-cerrados y verificados en esta máquina el mismo día — ver más abajo. M1 es
-el siguiente objetivo.
+Última actualización: 2026-09-07. Fase 1 completa de punta a punta (M0-M3,
+desplegada el 2026-09-05). Fase 2 arrancó el 2026-09-06 con el shell
+mínimo y M0 (`config/objectives.yaml`); M1 (`preferences.yaml`,
+`constraints.yaml`) cerrada el 2026-09-07 — ver más abajo. M2 es el
+siguiente objetivo.
 
 Este archivo contiene el estado operativo del proyecto. Las reglas duraderas
 están en `AGENTS.md`; no deben duplicarse aquí.
@@ -500,13 +500,42 @@ desde el navegador, commit real en el remoto local con la autoría
 correcta—. El detalle completo está en
 `docs/decisions/fase-2-perfil-editable.md`.
 
-## Siguiente objetivo: Fase 2 · M1
+### M1 — `preferences.yaml` y `constraints.yaml`, cerrada el 2026-09-07
 
-- **M1 — Extender a `config/preferences.yaml`** (68 líneas, 9 claves) **y
-  `config/constraints.yaml`** (60 líneas, con `pending_decisions` y
-  `superseded_decisions` como listas de diccionarios). Generaliza el
-  mecanismo de M0 a formas de YAML algo distintas, sin construir nada
-  nuevo de fondo.
+Investigado antes de escribir código: los dos ficheros seguían sin tocarse
+desde el 2026-08-13 y con el tamaño previsto, pero la forma que el troceo
+daba por hecha para `pending_decisions`/`superseded_decisions` era
+incorrecta -son una lista plana de strings y un mapa de clave a texto,
+respectivamente, no listas de diccionarios-. La complejidad real de "lista
+de diccionarios heterogénea" estaba en `disqualifying_conditions`, que el
+troceo no había mencionado. El detalle completo, y el porqué de cada
+decisión, está en `docs/decisions/fase-2-perfil-editable.md`.
+
+De paso, generalizar el mecanismo a nueve campos de texto plegado más
+sacó a la luz un bug latente de M0: reasignar
+`primary_objective.statement` en cada escritura, aunque no hubiera
+cambiado, podía reflowar su línea con el ancho por omisión de `ruamel` en
+vez de con el del fichero real. Corregido con dos funciones nuevas y
+compartidas en `data_repo_write/yaml_style.py`
+(`set_folded_if_changed`, `set_string_list_if_changed`), que ahora usan
+los tres módulos de fichero -`objectives.py` incluido, con su propio test
+de regresión-.
+
+Alcance confirmado con Pablo el 2026-09-07, más permisivo que la
+recomendación inicial: `hard_constraints` y `superseded_decisions`
+totalmente editables (CRUD completo en el segundo caso), y
+`disqualifying_conditions` con añadir fila y editar `rule`, sin borrar ni
+reordenar. `/perfil` pasa a tener tres pestañas -Objetivos, Preferencias,
+Restricciones-, alternadas sin cambiar de URL.
+
+Verificado en esta máquina el 2026-09-07: `make check` limpio (364 tests
+API + 17 web), `make e2e` con los 20 tests en verde -incluidos los 3
+nuevos de `perfil.spec.ts`-, y el mecanismo comprobado a mano por `curl`
+contra el stack de Compose real tras resembrar `.dev-data/` -el remoto de
+git local seguía teniendo la forma vieja de los fixtures de M0, y `make
+seed-data-repo-write` solo siembra una vez-.
+
+## Siguiente objetivo: Fase 2 · M2
 
 - **M2 — El banco de bullets y el contenido de variantes de rol**
   (`cv/content/professional_bullet_bank.yaml`, 260 líneas, 13 bullets

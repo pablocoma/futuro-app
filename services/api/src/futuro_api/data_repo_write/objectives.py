@@ -3,7 +3,9 @@
 Es lo único de este módulo que sabe que ese fichero existe, tiene esa
 forma, y se edita así. El mecanismo genérico -clonar, `pull --rebase`,
 commit, push, conflicto- vive en `git_ops.py` y no cambia una línea al
-llegar M1-M4 con sus propios ficheros.
+llegar M1-M4 con sus propios ficheros. El estilo de `ruamel.yaml` y la
+disciplina de "no tocar lo que no cambió" son compartidos en
+`yaml_style.py` -ver ese módulo para el porqué-.
 
 **El estilo del YAML no es gusto de esta app: es el del fichero real**, y
 hay que igualarlo o cada edición ensuciaría el diff con un reformateo que
@@ -27,19 +29,15 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import ValidationError
-from ruamel.yaml import YAML
-from ruamel.yaml.scalarstring import FoldedScalarString
 
 from futuro_api.data_repo_write.models import EditableObjectives, Objectives
+from futuro_api.data_repo_write.yaml_style import (
+    data_repo_yaml,
+    set_folded_if_changed,
+    set_string_list_if_changed,
+)
 
 RELATIVE_PATH = "config/objectives.yaml"
-
-
-def _yaml() -> YAML:
-    yaml = YAML(typ="rt")
-    yaml.preserve_quotes = True
-    yaml.indent(mapping=2, sequence=4, offset=2)
-    return yaml
 
 
 class ObjectivesValidationError(Exception):
@@ -60,7 +58,7 @@ class ObjectivesDiff:
 
 def _load(root: Path) -> tuple[Any, str]:
     text = (root / RELATIVE_PATH).read_text()
-    return _yaml().load(text), text
+    return data_repo_yaml().load(text), text
 
 
 def current(root: Path) -> Objectives:
@@ -77,12 +75,18 @@ def _apply(doc: Any, edit: EditableObjectives, *, updated_at: date) -> None:
     # flujo en vez de convertirlo en una lista de bloque.
     tenure = doc["transition"]["expected_tenure_years"]
     tenure[0], tenure[1] = edit.transition.expected_tenure_years
-    doc["primary_objective"]["statement"] = FoldedScalarString(
-        edit.primary_objective.statement
+    # `set_folded_if_changed`, no una reasignación directa: reconstruir el
+    # `FoldedScalarString` aunque el texto no cambiara reflowaba la línea
+    # con el ancho por omisión de `ruamel` en vez de con el del fichero
+    # real -hallazgo de M1, ver `yaml_style.py`-.
+    set_folded_if_changed(
+        doc["primary_objective"], "statement", edit.primary_objective.statement
     )
-    doc["success_dimensions"] = list(edit.success_dimensions)
-    doc["role_families"]["core"] = list(edit.role_families.core)
-    doc["role_families"]["exploratory"] = list(edit.role_families.exploratory)
+    set_string_list_if_changed(doc, "success_dimensions", edit.success_dimensions)
+    set_string_list_if_changed(doc["role_families"], "core", edit.role_families.core)
+    set_string_list_if_changed(
+        doc["role_families"], "exploratory", edit.role_families.exploratory
+    )
 
 
 def prepare(root: Path, edit: EditableObjectives, *, today: date) -> ObjectivesDiff:
@@ -102,7 +106,7 @@ def prepare(root: Path, edit: EditableObjectives, *, today: date) -> ObjectivesD
         raise ObjectivesValidationError(error) from error
 
     buf = io.StringIO()
-    _yaml().dump(doc, buf)
+    data_repo_yaml().dump(doc, buf)
     new_text = buf.getvalue()
 
     diff = "".join(

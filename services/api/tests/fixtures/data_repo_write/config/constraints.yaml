@@ -1,0 +1,53 @@
+# Restricciones INVENTADAS, para sembrar el remoto de git sintético de
+# data_repo_write. Nada de aquí sale del repositorio privado.
+#
+# Mismas nueve claves que el `constraints.yaml` real -comprobado contra el
+# repositorio privado el 2026-09-07-, con valores inventados.
+# `disqualifying_conditions` lleva a propósito un elemento con
+# `evaluable_from_posting` y otro con `affects`, como el fichero real: son
+# los dos únicos campos extra que puede traer una fila, y ninguno de los
+# dos lo gestiona el formulario.
+
+version: 1
+updated_at: 2026-01-01
+
+hard_constraints:
+  - no_fabricated_claims
+  - no_employer_or_client_confidential_information
+
+current_known_constraints:
+  timing: transition_during_2026
+  spain_salary_floor_gross_eur: 30000
+  relocation: accepted
+  visa_sponsorship: accepted
+  eu_work_authorization: true
+
+sector_policy:
+  excluded_industries: []
+  rule: >-
+    Regla inventada de política sectorial para el fixture.
+  note: >-
+    Nota inventada, no un dato real.
+
+disqualifying_conditions:
+  - id: invented_condition_one
+    rule: >-
+      Regla inventada de descalificación número uno, para el fixture.
+    evaluable_from_posting: a_menudo_no
+  - id: invented_condition_two
+    rule: >-
+      Regla inventada de descalificación número dos, para el fixture.
+    affects: >-
+      Nota inventada de a qué afecta esta condición.
+
+accepted_conditions:
+  on_call_and_shift_work: aceptado
+  high_intensity: >-
+    Aceptado según preferences.yaml, nota inventada para el fixture.
+
+pending_decisions:
+  - invented_pending_decision
+
+superseded_decisions:
+  invented_superseded_decision: >-
+    Texto inventado explicando por qué se sustituyó esta decisión.

@@ -78,6 +78,31 @@ def test_prepare_conserva_el_estilo_de_las_listas_de_flujo(root: Path) -> None:
     assert "expected_tenure_years: [3, 5]" in result.new_text
 
 
+def test_prepare_no_reflowa_un_campo_plegado_que_no_cambio(root: Path) -> None:
+    """Hallazgo de M1: reconstruir `FoldedScalarString` con el mismo texto
+    reenvuelve la línea con el ancho por omisión de `ruamel`, distinto del
+    ancho a mano del fichero real, y eso ensucia el diff sin que el campo
+    haya cambiado de verdad. Editar solo `target_year` y dejar la
+    declaración intacta no debe tocar su línea."""
+    current = objectives.current(root)
+    result = objectives.prepare(
+        root,
+        _edit(
+            transition=Transition(
+                target_year=2031,
+                urgency="low",
+                expected_tenure_years=(2, 4),
+            ),
+            primary_objective=PrimaryObjective(
+                statement=current.primary_objective.statement
+            ),
+        ),
+        today=date(2026, 9, 6),
+    )
+    assert "statement" not in result.unified_diff
+    assert "target_year: 2031" in result.new_text
+
+
 def test_role_families_rechaza_una_familia_que_el_codigo_no_conoce() -> None:
     """La puerta de verdad está en el modelo: ni siquiera llega a
     `prepare` -y por tanto tampoco al endpoint- un valor que

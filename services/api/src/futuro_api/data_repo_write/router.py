@@ -25,9 +25,16 @@ from fastapi import APIRouter, Body, HTTPException, Request, status
 from pydantic import BaseModel
 
 from futuro_api.config import Settings
-from futuro_api.data_repo_write import git_ops, objectives
+from futuro_api.data_repo_write import constraints, git_ops, objectives, preferences
 from futuro_api.data_repo_write.git_ops import GitRemote
-from futuro_api.data_repo_write.models import EditableObjectives, Objectives
+from futuro_api.data_repo_write.models import (
+    Constraints,
+    EditableConstraints,
+    EditableObjectives,
+    EditablePreferences,
+    Objectives,
+    Preferences,
+)
 
 router = APIRouter(prefix="/api/profile", tags=["profile"])
 
@@ -151,3 +158,145 @@ async def commit_objectives(
         ) from error
 
     return ObjectivesCommitResponse(commit_sha=sha, diff=result.unified_diff)
+
+
+class PreferencesDiffResponse(BaseModel):
+    diff: str
+    validated: Preferences
+
+
+class PreferencesCommitResponse(BaseModel):
+    commit_sha: str
+    diff: str
+
+
+@router.get("/preferences", summary="El preferences.yaml vigente")
+async def get_preferences(request: Request) -> Preferences:
+    root, remote = _configured(request)
+    _sync(root, remote)
+    return preferences.current(root)
+
+
+@router.post(
+    "/preferences/diff",
+    summary="Calcula el diff de una edición, sin escribir nada",
+)
+async def diff_preferences(
+    request: Request, edit: Annotated[EditablePreferences, Body()]
+) -> PreferencesDiffResponse:
+    root, remote = _configured(request)
+    _sync(root, remote)
+    try:
+        result = preferences.prepare(root, edit, today=date.today())
+    except preferences.PreferencesValidationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+        ) from error
+    return PreferencesDiffResponse(diff=result.unified_diff, validated=result.validated)
+
+
+@router.post(
+    "/preferences/commit",
+    status_code=status.HTTP_201_CREATED,
+    summary="Escribe, commitea y empuja una edición",
+)
+async def commit_preferences(
+    request: Request, edit: Annotated[EditablePreferences, Body()]
+) -> PreferencesCommitResponse:
+    root, remote = _configured(request)
+    _sync(root, remote)
+    try:
+        result = preferences.write(root, edit, today=date.today())
+    except preferences.PreferencesValidationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+        ) from error
+
+    try:
+        sha = git_ops.commit_and_push(
+            root,
+            remote,
+            [preferences.RELATIVE_PATH],
+            message="profile: actualizar config/preferences.yaml",
+            author_name=AUTHOR_NAME,
+            author_email=AUTHOR_EMAIL,
+        )
+    except git_ops.GitConflictError as error:
+        raise _conflict(error) from error
+    except git_ops.GitOpsError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)
+        ) from error
+
+    return PreferencesCommitResponse(commit_sha=sha, diff=result.unified_diff)
+
+
+class ConstraintsDiffResponse(BaseModel):
+    diff: str
+    validated: Constraints
+
+
+class ConstraintsCommitResponse(BaseModel):
+    commit_sha: str
+    diff: str
+
+
+@router.get("/constraints", summary="El constraints.yaml vigente")
+async def get_constraints(request: Request) -> Constraints:
+    root, remote = _configured(request)
+    _sync(root, remote)
+    return constraints.current(root)
+
+
+@router.post(
+    "/constraints/diff",
+    summary="Calcula el diff de una edición, sin escribir nada",
+)
+async def diff_constraints(
+    request: Request, edit: Annotated[EditableConstraints, Body()]
+) -> ConstraintsDiffResponse:
+    root, remote = _configured(request)
+    _sync(root, remote)
+    try:
+        result = constraints.prepare(root, edit, today=date.today())
+    except constraints.ConstraintsValidationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+        ) from error
+    return ConstraintsDiffResponse(diff=result.unified_diff, validated=result.validated)
+
+
+@router.post(
+    "/constraints/commit",
+    status_code=status.HTTP_201_CREATED,
+    summary="Escribe, commitea y empuja una edición",
+)
+async def commit_constraints(
+    request: Request, edit: Annotated[EditableConstraints, Body()]
+) -> ConstraintsCommitResponse:
+    root, remote = _configured(request)
+    _sync(root, remote)
+    try:
+        result = constraints.write(root, edit, today=date.today())
+    except constraints.ConstraintsValidationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+        ) from error
+
+    try:
+        sha = git_ops.commit_and_push(
+            root,
+            remote,
+            [constraints.RELATIVE_PATH],
+            message="profile: actualizar config/constraints.yaml",
+            author_name=AUTHOR_NAME,
+            author_email=AUTHOR_EMAIL,
+        )
+    except git_ops.GitConflictError as error:
+        raise _conflict(error) from error
+    except git_ops.GitOpsError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)
+        ) from error
+
+    return ConstraintsCommitResponse(commit_sha=sha, diff=result.unified_diff)

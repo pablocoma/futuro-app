@@ -104,3 +104,36 @@ body {
 .btn-link:hover::after {
   width: 100%;
 }
+
+/*
+ * El selector de pestañas de `/perfil` (Fase 2 M1): "vistas intercambiables
+ * ... alternadas desde un selector en la barra superior sin cambiar de
+ * URL", según `docs/APP_SCREENS.md`. Subrayado que aparece bajo la
+ * pestaña activa, mismo lenguaje visual que `.btn-link` en vez de un
+ * componente nuevo.
+ */
+.tab {
+  position: relative;
+  padding-bottom: 10px;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-ink3);
+  transition: color 0.3s;
+}
+.tab:hover {
+  color: var(--color-ink2);
+}
+.tab-active {
+  color: var(--color-ink);
+}
+.tab-active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--color-acc);
+}

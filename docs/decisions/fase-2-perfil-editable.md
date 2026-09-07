@@ -286,3 +286,189 @@ los dos hallazgos de React de arriba.
 directorio en la VM de producción. `docs/deployment.md` §10 describe el
 procedimiento; queda pendiente de que Pablo lo ejecute antes del próximo
 merge a `main` que quiera llevar Fase 2 a producción.
+
+## 2026-09-07 — M1, generalizar el mecanismo a `preferences.yaml` y `constraints.yaml`
+
+### La investigación corrigió el troceo, no lo confirmó
+
+`NEXT_SESSION.md` daba por hecho, desde el troceo del 2026-09-06, que
+`pending_decisions` y `superseded_decisions` eran "listas de
+diccionarios". Investigado el `career-strategy` real antes de escribir
+código: los dos ficheros no se habían tocado desde el 2026-08-13 y sus
+tamaños son exactos (68 y 60 líneas), pero esa forma concreta era
+incorrecta:
+
+- `pending_decisions` es una **lista plana de strings** -el mismo patrón
+  que `success_dimensions`/`role_families` de M0-, no una lista de
+  diccionarios.
+- `superseded_decisions` es un **mapa de clave -> texto**, no una lista.
+- La complejidad real de "lista de diccionarios heterogénea" está en
+  **`disqualifying_conditions`**, que el troceo no mencionaba: cada
+  elemento trae `id` + `rule`, y además `evaluable_from_posting` *o*
+  `affects` según el caso.
+
+Por grep en `services/api/src` antes de diseñar: **ningún campo de los dos
+ficheros es vocabulario de código**, salvo `disqualifying_conditions.id`/
+`.rule`, que `assessment/prompt.py` mete como texto libre en el prompt del
+modelo -no se compara contra ningún enum en ningún sitio, a diferencia de
+`role_families`-. No hace falta ninguna puerta de vocabulario nueva en
+`models.py` para M1.
+
+### Hallazgo de fondo: reasignar un valor sin cambiarlo puede ensuciar el diff
+
+Antes de escribir `preferences.py`/`constraints.py` se repitió el
+experimento de ruamel que ya había servido en M0, esta vez contra
+`constraints.yaml` real, con un resultado que obligó a rediseñar el
+mecanismo:
+
+- Envolver un texto en `FoldedScalarString` de nuevo -incluso con el mismo
+  texto aplanado que ya había- lo reenvuelve con el ancho por omisión de
+  `ruamel`, que no coincide con el ancho a mano del fichero real. El
+  resultado es un diff que cambia una línea de un campo que el usuario no
+  tocó.
+- Reemplazar una `CommentedSeq` entera, o incluso mutarla con un
+  slice-assign de contenido idéntico, puede perder la línea en blanco de
+  cierre que quedó asociada a su último elemento.
+
+Comprobado contra `objectives.yaml` real: **`_apply()` de M0 ya tenía este
+bug**, sin que nadie lo hubiera visto. `primary_objective.statement` se
+reasigna en cada escritura sin comprobar si cambió; editar solo
+`target_year` y dejar la declaración intacta reflowaba igualmente su
+línea. Nunca se detectó en M0 porque solo hay un campo plegado y las
+verificaciones siempre tocaban también la declaración a la vez. Con M1
+esto habría sido crítico: los dos ficheros nuevos traen nueve campos de
+texto plegado entre los dos, y sin corregirlo casi cualquier edición
+habría reformateado media prosa del fichero sin motivo.
+
+**Corrección: comparar antes de reasignar, y no tocar nada si no cambió de
+verdad.** `data_repo_write/yaml_style.py` reúne la configuración de
+`ruamel.yaml` -antes duplicada en `objectives.py`, decisión 4A confirmada
+con Pablo, ahora sí compartida entre los tres módulos porque divergir en
+uno solo reformatearía ese fichero entero en su próximo commit sin que
+nadie lo note- y dos funciones nuevas:
+
+- `set_folded_if_changed(mapping, key, text)`: no construye siquiera el
+  `FoldedScalarString` si el texto no cambió.
+- `set_string_list_if_changed(container, key, values)`: muta la
+  `CommentedSeq` en su sitio (`[:]`, nunca reemplaza la clave entera) y
+  solo si la lista difiere de la que ya hay.
+
+`objectives.py` se retocó para usar las dos -mismo comportamiento hacia
+fuera, corrige el bug de `primary_objective.statement`-, con un test de
+regresión nuevo (`test_prepare_no_reflowa_un_campo_plegado_que_no_cambio`)
+que edita `target_year` y deja la declaración intacta, comprobando que su
+línea no aparece en el diff.
+
+### Alcance confirmado con Pablo el 2026-09-07
+
+Frente a las cuatro preguntas de diseño planteadas antes de escribir
+código:
+
+- **`hard_constraints` y `superseded_decisions`, totalmente editables**
+  (no solo lectura, que era la recomendación inicial). Decisión de Pablo:
+  "no creo que pase nada por dejarme editar si yo sé lo que me hago".
+  `hard_constraints` se edita como lista de texto libre igual que
+  `pending_decisions`, con `min_length=1` en el modelo -protege solo
+  contra vaciarla entera por accidente, no restringe qué se escribe en
+  ella-. `superseded_decisions` se edita con CRUD completo: añadir,
+  editar, quitar filas de `{clave, texto}`.
+- **`disqualifying_conditions`: añadir filas y editar su `rule`, sin
+  borrar ni reordenar.** Casado por `id` -texto libre, no vocabulario de
+  código-; el campo extra de cada fila (`evaluable_from_posting`/
+  `affects`) no lo gestiona el formulario y se enseña de solo lectura.
+- **Pestañas en `/perfil`, sin cambiar de URL**, reutilizando el patrón de
+  "selector arriba" que `docs/APP_SCREENS.md` documenta para Pipeline/
+  CVs/Stats -aunque esa nota hablaba de vistas del mismo dato, no de tres
+  formularios de tres ficheros distintos; se adoptó igual porque es el
+  vocabulario visual que ya existe y no había motivo para inventar uno
+  nuevo-.
+- **`_yaml()` compartida**, ver el hallazgo de arriba.
+
+### El mecanismo: `preferences.py` y `constraints.py`
+
+Mismo patrón que `objectives.py` -`current`/`prepare`/`write`, revalida el
+documento entero tras aplicar la edición-. Lo específico de cada fichero:
+
+- **`preferences.py`** no tiene ninguna estructura nueva: nueve claves,
+  todas escalares, pares de flujo (`intended_duration_years`,
+  `current_living_costs_monthly_eur`, mismo patrón que
+  `expected_tenure_years` de M0) o texto plegado con `set_folded_if_changed`.
+- **`constraints.py`**:
+  - `_apply_disqualifying_conditions` casa cada edición por `id` contra
+    las filas existentes -un `dict` de `id -> CommentedMap`-, muta `rule`
+    en su sitio con `set_folded_if_changed`, y añade un `CommentedMap`
+    nuevo (`id` + `rule` en `FoldedScalarString`) para cualquier `id` que
+    no exista todavía. Un `id` que el envío no traiga se queda como
+    estaba: sin borrado, a propósito.
+  - `_apply_superseded_decisions` opera sobre el `CommentedMap` real del
+    documento: borra las claves que ya no estén en el envío, muta en su
+    sitio (`set_folded_if_changed`) las que sigan y cambien de texto, y
+    añade las nuevas al final. Nunca reconstruye el mapa entero -eso fue
+    justo lo que el experimento de arriba descartó, porque reflowaría el
+    texto de toda entrada aunque no hubiera cambiado-. Como asignar a una
+    clave existente no cambia su posición en un `CommentedMap`, el orden
+    de las claves que sobreviven se conserva solo, sin necesitar un paso
+    de reordenar aparte.
+  - `EditableConstraints.superseded_decisions` acepta tanto la lista de
+    pares `{key, text}` que manda el formulario como el mapa que trae el
+    YAML real -un `field_validator(mode="before")` convierte el segundo
+    al primero-, porque `current()` valida el documento tal cual sale de
+    `ruamel` y el formulario valida y manda la otra forma.
+
+### El formulario: pestañas y filas dinámicas
+
+`PerfilTabs.tsx` mantiene qué pestaña está activa en estado de React, sin
+tocar la URL; cada formulario (`ObjectivesForm`, `PreferencesForm`,
+`ConstraintsForm`) sigue siendo dueño de su propio estado y de su propio
+`useActionState`, así que cambiar de pestaña no descarta un diff a medias
+de otra -solo desmonta el formulario que deja de verse-.
+
+`PreferencesForm` no tiene ninguna dificultad nueva: son los mismos
+campos controlados que `ObjectivesForm` ya usaba, multiplicados. Las
+filas dinámicas de `ConstraintsForm` sí lo son:
+
+- **`disqualifying_conditions`**: `id` es de **solo lectura** en una fila
+  existente -un input de texto libre ahí permitiría "renombrar" un `id`
+  sin querer, que en el backend equivale a dejar la fila vieja intacta y
+  crear una nueva duplicada, porque el casado es por `id`-. Solo la fila
+  de "añadir condición nueva", al final, tiene un campo de identificador.
+- **`superseded_decisions`**: clave y texto son editables en cualquier
+  fila, con un botón de quitar por fila y uno de añadir al final -CRUD
+  completo, sin el mismo riesgo de duplicado porque aquí no hay ninguna
+  otra pantalla que dependa de que una clave se mantenga estable-.
+- Las dos listas viajan al servidor como JSON en un campo oculto
+  (`disqualifying_conditions_json`, `superseded_decisions_json`) en vez de
+  como campos de `FormData` indexados: son de longitud variable, y
+  serializar el estado de React que ya se mantiene es más simple y menos
+  frágil que reconstruir un array a partir de claves `dq_id_0`, `dq_id_1`,
+  etc.
+
+### Fixtures y verificación
+
+Fixtures nuevos, con datos inventados: `tests/fixtures/data_repo_write/config/preferences.yaml`
+y `.../constraints.yaml`, mismas nueve claves que los ficheros reales
+-comprobado contra `career-strategy` el 2026-09-07-, `disqualifying_conditions`
+con un elemento `evaluable_from_posting` y otro `affects` a propósito,
+como el real.
+
+**Trampa encontrada al verificar en el navegador:** el remoto de git local
+que hace de "GitHub" en desarrollo (`.dev-data/repo-write-remote.git`) ya
+estaba sembrado desde M0, con la forma vieja de los fixtures. `make
+seed-data-repo-write` solo siembra una vez -`if [ ! -d ... ]`-, así que la
+API tiraba un 500 (`FileNotFoundError`) hasta borrar `.dev-data/` a mano y
+dejar que `make up` lo resembrara. No es un bug: es el precio de que el
+seed sea idempotente a propósito. Cualquier sesión que amplíe el fixture
+de escritura tendrá que hacer lo mismo.
+
+Verificado en esta máquina el 2026-09-07: `make check` limpio (364 tests
+API -28 nuevos de `preferences`/`constraints`/`yaml_style`, más el de
+regresión de `objectives`- + 17 web), `make e2e` con los 20 tests en verde
+-incluidos los 3 nuevos de `perfil.spec.ts`: alternar pestañas sin cambiar
+de URL, editar una preferencia de punta a punta, y añadir a la vez una
+condición descalificante y una decisión sustituida-, y el mecanismo
+comprobado a mano contra el stack de Compose real por `curl`
+(`GET`/`preferences`, `GET`/`constraints`) tras resembrar el remoto local.
+
+**Sin verificar, y no se puede desde aquí:** lo mismo que M0 -la deploy
+key de verdad y el directorio en la VM de producción-, sin cambios desde
+entonces.

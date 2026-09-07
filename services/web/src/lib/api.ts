@@ -436,3 +436,152 @@ export function commitObjectives(
 ): Promise<PostResult<ObjectivesCommit>> {
   return apiPost<ObjectivesCommit>("/api/profile/objectives/commit", edit);
 }
+
+/**
+ * `config/preferences.yaml`, Fase 2 M1. Ninguna de sus nueve claves es
+ * vocabulario de código -comprobado por grep antes de construir este
+ * módulo-, así que no hay ningún `Record` de etiquetas que mantener aquí,
+ * a diferencia de `role_families`.
+ */
+export type Preferences = {
+  version: number;
+  updated_at: string;
+  work_content: {
+    preference: string;
+    avoid_narrow_specialization: boolean;
+    client_facing: string;
+    programming: string;
+    travel: string;
+  };
+  work_intensity: {
+    willing_to_accept_high_intensity: boolean;
+    intended_duration_years: [number, number];
+    condition: string;
+  };
+  work_mode: { onsite: string; hybrid: string; remote: string };
+  geography: {
+    eu_passport: boolean;
+    visa_sponsorship: string;
+    countries: string;
+    madrid_advantage: string;
+  };
+  compensation: {
+    spain_minimum_gross_eur: number;
+    current_madrid_gross_eur: number;
+    current_madrid_net_monthly_eur: number;
+    current_madrid_payments_per_year: number;
+    current_living_costs_monthly_eur: [number, number];
+    current_annual_savings_eur: number;
+    savings_baseline_note: string;
+    abroad_housing_assumption: string;
+    outside_madrid_rule: string;
+    international_targets: string;
+  };
+  language: {
+    spanish: string;
+    english_interview: string;
+    evidence: string[];
+    cv_policy: string;
+  };
+  professional_project_documentation: {
+    contribution_granularity: string;
+    avoid_internal_task_breakdown: boolean;
+    acceptable_evidence: string;
+    cv_implication: string;
+  };
+};
+
+export type EditablePreferences = Omit<Preferences, "version" | "updated_at">;
+export type PreferencesDiff = { diff: string; validated: Preferences };
+export type PreferencesCommit = { commit_sha: string; diff: string };
+
+export async function getPreferences(): Promise<Preferences | null> {
+  try {
+    const response = await fetch(`${API_INTERNAL_URL}/api/profile/preferences`, {
+      headers: await cookieHeaders(),
+      cache: "no-store",
+    });
+    if (!response.ok) return null;
+    return (await response.json()) as Preferences;
+  } catch {
+    return null;
+  }
+}
+
+export function diffPreferences(
+  edit: EditablePreferences,
+): Promise<PostResult<PreferencesDiff>> {
+  return apiPost<PreferencesDiff>("/api/profile/preferences/diff", edit);
+}
+
+export function commitPreferences(
+  edit: EditablePreferences,
+): Promise<PostResult<PreferencesCommit>> {
+  return apiPost<PreferencesCommit>("/api/profile/preferences/commit", edit);
+}
+
+/**
+ * `config/constraints.yaml`, Fase 2 M1.
+ *
+ * `superseded_decisions` es un mapa de clave -> texto en el YAML, pero
+ * viaja aquí como lista ordenada de pares: es lo que permite editarlo con
+ * un formulario de filas -añadir, editar, quitar- en vez de un objeto de
+ * claves dinámicas. `constraints.py` hace la conversión de vuelta al
+ * escribir.
+ */
+export type DisqualifyingCondition = { id: string; rule: string };
+export type SupersededDecision = { key: string; text: string };
+
+export type Constraints = {
+  version: number;
+  updated_at: string;
+  hard_constraints: string[];
+  current_known_constraints: {
+    timing: string;
+    spain_salary_floor_gross_eur: number;
+    relocation: string;
+    visa_sponsorship: string;
+    eu_work_authorization: boolean;
+  };
+  sector_policy: {
+    excluded_industries: string[];
+    rule: string;
+    note: string;
+  };
+  disqualifying_conditions: DisqualifyingCondition[];
+  accepted_conditions: {
+    on_call_and_shift_work: string;
+    high_intensity: string;
+  };
+  pending_decisions: string[];
+  superseded_decisions: SupersededDecision[];
+};
+
+export type EditableConstraints = Omit<Constraints, "version" | "updated_at">;
+export type ConstraintsDiff = { diff: string; validated: Constraints };
+export type ConstraintsCommit = { commit_sha: string; diff: string };
+
+export async function getConstraints(): Promise<Constraints | null> {
+  try {
+    const response = await fetch(`${API_INTERNAL_URL}/api/profile/constraints`, {
+      headers: await cookieHeaders(),
+      cache: "no-store",
+    });
+    if (!response.ok) return null;
+    return (await response.json()) as Constraints;
+  } catch {
+    return null;
+  }
+}
+
+export function diffConstraints(
+  edit: EditableConstraints,
+): Promise<PostResult<ConstraintsDiff>> {
+  return apiPost<ConstraintsDiff>("/api/profile/constraints/diff", edit);
+}
+
+export function commitConstraints(
+  edit: EditableConstraints,
+): Promise<PostResult<ConstraintsCommit>> {
+  return apiPost<ConstraintsCommit>("/api/profile/constraints/commit", edit);
+}
