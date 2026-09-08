@@ -11,91 +11,25 @@ deploy key.
 
 ## Estado
 
-Fase 0.5 cerrada el 2026-09-03: el generador de variantes de CV en
-Python/Jinja2 (paquete `cv_builder`) y el `Dockerfile` con Tectonic y caché de
-paquetes precalentada. Ver `src/cv_builder/README.md` para el uso del CLI y el
-contrato que debe cumplir la plantilla del maestro. El workflow `build-cvs` de
-GitHub Actions del repositorio privado `Futuro` ya lo invoca para regenerar y
-compilar las cinco variantes base.
+- **Fase 0.5** (generador de CVs, ejecutado en CI del repositorio
+  privado) — cerrada 2026-09-03.
+- **Fase 1** (núcleo: pegar oferta → extraer → puntuar → recomendar
+  variante → descargar el PDF que CI construyó) — cerrada y **en
+  producción** desde 2026-09-05.
+- **Fase 2** (perfil editable: los ocho YAML del repositorio privado,
+  con diff en pantalla y confirmación antes de cada commit) — cerrada en
+  código el 2026-09-08. Pendiente de aprovisionar a mano en producción:
+  la deploy key de lectura-escritura (`docs/deployment.md` §10).
+- **Fase 3** (pipeline y seguimiento) — en curso desde 2026-09-08, en
+  ocho rebanadas. A diferencia de Fase 2, no toca el repositorio privado.
+  Rebanada 1 (modelo de estados de candidatura, `offer_status_events`)
+  cerrada el 2026-09-08.
 
-En curso, Fase 1 — el núcleo de la aplicación: pegar texto de una oferta →
-clasificar con LLM → scoring → recomendar variante → descargar el PDF que CI
-construyó. Se entrega en cuatro rebanadas verticales (M0 a M3); troceo y
-estado en `NEXT_SESSION.md`.
-
-M0 (esqueleto) está cerrada: Compose con `caddy`, `api` (FastAPI + uv), `web`
-(Next.js 16) y `postgres`, la API cerrada por omisión, OAuth de Google con
-allowlist de un email, y CI en `dev`.
-
-M1 (ingesta y extracción) está cerrada: pegar el texto de una oferta,
-extraerla con el LLM en segundo plano y ver lo extraído con la evidencia de
-cada campo al lado —la cita literal cuando consta, el razonamiento y la
-confianza cuando se dedujo, «sin datos» cuando no aparece—. El LLM elige y
-cita; el código valida en Python, degrada lo que el contrato manda degradar y
-deja constancia de cada corrección. Con esto entran los seis servicios de la
-arquitectura: `redis` y `worker` incluidos.
-
-M2 (scoring y recomendación de variante) está cerrada: una oferta extraída se
-puntúa sola contra el modelo de scoring del repositorio privado y se le
-recomienda una de las cinco variantes de CV que ya existen. Aquí el principio
-es distinto del de M1: **el LLM juzga y el código calcula**. El modelo pone la
-nota de cada dimensión, la cita que la sostiene y el motivo; la media
-ponderada, la renormalización, la cobertura, el cubo de cartera y el nivel de
-esfuerzo los calcula Python, y el esquema de salida del modelo no tiene
-siquiera dónde escribirlos. Una nota sin cita no entra: su dimensión queda
-sin puntuar, y la pantalla lo enseña como un hueco rayado en vez de
-ocultarlo. La puntuación es recalculable sin volver a llamar al modelo, y hay
-un camino real para repuntuar el histórico recorriendo la base de datos.
-
-M3 (entrega del PDF y dossier mínimo) está cerrada, y con ella **la Fase 1
-entera**: con una oferta ya puntuada, se puede ver el PDF de cualquiera de
-las variantes disponibles —leído de un clon de solo lectura del repositorio
-privado—, confirmar una o cambiarla, y esa confirmación queda en su propia
-fila en Postgres sin tocar la recomendación del modelo.
-
-**En producción desde el 2026-09-05.** Cada merge a `main` despliega solo:
-imágenes arm64 a GHCR, SSH a la VM de Oracle, el clon del repositorio de
-datos, migraciones, comprobación de salud y rollback al tag anterior si
-falla. Lo que hay que provisionar a mano —y las trampas que tiene— está en
-`docs/deployment.md`; los valores concretos viven en el repositorio
-privado, nunca aquí.
-
-**Fase 2 — perfil editable — completa**, la primera que escribe en el
-repositorio privado, en cinco rebanadas (detalle en `NEXT_SESSION.md`). El
-shell mínimo (barra lateral/inferior con Pipeline, Capturar y Perfil), M0
-—el mecanismo de escritura entero, demostrado sobre
-`config/objectives.yaml`: `pull --rebase`, `ruamel.yaml`, validación
-Pydantic, diff en pantalla, `commit`+`push` con autoría propia y
-conflicto sin forzar nada—, M1 —el mismo mecanismo generalizado a
-`config/preferences.yaml` y `config/constraints.yaml`—, M2 —el banco de
-bullets (`cv/content/professional_bullet_bank.yaml`) y el contenido de
-variantes de rol (`cv/content/role_variant_content.yaml`), con las
-`claim_rules` de `config/cv_variants.yaml` validadas también al guardar—,
-M3 —`config/cv_variants.yaml` (`base_variants`, con `claim_rules` y
-`fixed_sections` de solo lectura) y `profile/project_catalog.yaml`
-(primera vez que esta app lo lee o escribe), con la primera validación
-cruzada de verdad entre los cuatro ficheros que tocan las dos últimas
-rebanadas— y **M4** —`config/scoring_model.yaml`, la más delicada: decide
-qué variante de CV se recomienda en producción, así que el bloque que
-documenta en prosa umbrales que en realidad decide a mano
-`assessment/scoring.py` queda de solo lectura, mismo criterio que
-`claim_rules`/`fixed_sections`; el resto (dimensiones, filtros, línea
-base económica, bandas de probabilidad, orden de esfuerzo) es editable—
-están cerradas y verificadas en esta máquina, con `/perfil` ya en ocho
-pestañas. Pendiente de aprovisionar a mano en producción: la deploy key
-de lectura-escritura (`docs/deployment.md` §10).
-
-**Fase 3 — pipeline y seguimiento — en curso**, en ocho rebanadas
-(troceo y estado en `NEXT_SESSION.md`). A diferencia de Fase 2, no toca
-el repositorio privado. Su **rebanada 1 —modelo de estados de
-candidatura— está cerrada**: una línea de tiempo propia
-(`offer_status_events`, migración `0004`) con los cinco estados de
-`docs/OFFER_DATA_CONTRACT.md` (`research`, `preparing`, `submitted`,
-`interview`, `closed`), separada a propósito del dossier de variante
-confirmada de Fase 1 M3 —el estado empieza antes de que exista ninguna
-variante—, sin orden de transición forzado y sin mover nada al confirmar
-una variante. `/ofertas` y `/ofertas/[id]` ya lo enseñan y lo cambian.
-Siguiente: rebanada 2, la pantalla Pipeline de verdad (tabla densa).
+Qué se integró y por qué en cada fase: `docs/decisions/fase-<n>-*.md`
+(un fichero por fase, ampliado en cada rebanada, sin podar nunca). Estado
+operativo del día a día y troceo de la fase en curso: `NEXT_SESSION.md`,
+que sí se reescribe en cada cierre y no acumula el detalle que ya vive en
+`docs/decisions/`.
 
 ## Desarrollo local
 
