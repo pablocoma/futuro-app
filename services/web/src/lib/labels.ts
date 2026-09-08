@@ -1,3 +1,5 @@
+import type { ApplicationStatus } from "@/lib/api";
+
 /**
  * Cómo se llama cada campo en pantalla.
  *
@@ -52,6 +54,25 @@ export const ASSESSMENT_STATUS_LABELS: Record<string, string> = {
   succeeded: "puntuada",
   failed: "fallida",
 };
+
+/**
+ * El estado de una candidatura (Fase 3, rebanada 1). Vocabulario de
+ * **código** -`pipeline/vocabularies.py`, no el repositorio privado-, así
+ * que sí se traduce aquí, mismo criterio que `ROLE_FAMILY_LABELS`. El orden
+ * de las claves es el de una progresión típica, pero la aplicación no
+ * impone ese orden: es solo el que sigue este objeto al listar botones.
+ */
+export const APPLICATION_STATUS_LABELS: Record<ApplicationStatus, string> = {
+  research: "en investigación",
+  preparing: "preparando candidatura",
+  submitted: "enviada",
+  interview: "entrevista",
+  closed: "cerrada",
+};
+
+export const APPLICATION_STATUSES = Object.keys(
+  APPLICATION_STATUS_LABELS,
+) as ApplicationStatus[];
 
 /**
  * Los estados de los filtros, los cubos de cartera y los niveles de

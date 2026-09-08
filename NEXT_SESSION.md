@@ -7,8 +7,11 @@ mínimo y M0 (`config/objectives.yaml`, 2026-09-06); M1 (`preferences.yaml`,
 variantes de rol, 2026-09-07); M3 (`config/cv_variants.yaml` y
 `profile/project_catalog.yaml`, la primera rebanada con validación cruzada
 de verdad entre ficheros, 2026-09-07); M4 (`config/scoring_model.yaml`, la
-más delicada, cierra Fase 2 entera, 2026-09-08) — ver más abajo. Siguiente
-objetivo principal: **Fase 3 — Pipeline y seguimiento**.
+más delicada, cierra Fase 2 entera, 2026-09-08) — ver más abajo. **Fase 3 —
+pipeline y seguimiento — en curso**, troceada en ocho rebanadas el
+2026-09-08; su rebanada 1 (estados de candidatura) ya está cerrada. Ver más
+abajo, sección «Fase 3». Siguiente objetivo: rebanada 2 (Pipeline: tabla
+densa).
 
 Este archivo contiene el estado operativo del proyecto. Las reglas duraderas
 están en `AGENTS.md`; no deben duplicarse aquí.
@@ -760,21 +763,97 @@ construyó esta fase.
 producción**: la deploy key de lectura-escritura y el directorio en la VM
 (`docs/deployment.md` §10), pendiente desde M0 de que Pablo lo ejecute.
 
-## Siguiente objetivo principal: Fase 3 — Pipeline y seguimiento
+## Fase 3 — Pipeline y seguimiento (en curso)
 
-Según `ARCHITECTURE.md`, Fase 3 es «estados, interacciones, recordatorios
-y el bot de Telegram avisando e ingiriendo ofertas». No troceada
-todavía: es el primer trabajo de la siguiente sesión, antes de escribir
-código, con el mismo hábito que ya demostró Fase 2 -investigar el estado
-real de lo que se vaya a tocar (`APP_SCREENS.md` §"Pipeline" y §"Hoy" del
-repositorio privado, el estado de la integración de Telegram si existe
-alguna) antes de dar por buena una cifra o una forma de memoria-.
+Según `ARCHITECTURE.md` (repositorio privado), Fase 3 es «estados,
+interacciones, recordatorios y el bot de Telegram avisando e ingiriendo
+ofertas».
+
+Investigado antes de trocear, el 2026-09-08: `docs/APP_SCREENS.md`
+§Pipeline describe tres vistas intercambiables (tabla densa, mapa valor ×
+probabilidad, kanban por etapa); §Hoy es una cola de decisiones agrupada
+por tipo de pendiente. Ninguna de las dos tenía pantalla real -`/ofertas`
+era el listado plano de Fase 1 M1, con su propio código admitiéndolo-.
+Telegram no tiene ni una línea de código en ningún repositorio, solo
+prosa. `applications` (Fase 1 M3) es hoy solo el dossier de variante
+confirmada, sin nada de estado, interacción ni recordatorio.
+
+**Troceo confirmado con Pablo el 2026-09-08, en ocho rebanadas** -más que
+las cinco de Fase 2 a propósito: Pablo pidió que cada sesión termine en
+torno al 30-40% de uso de contexto, así que se separa lo exploratorio
+(una decisión de modelo de datos, una vista nueva tipo kanban, una
+integración externa) en piezas más pequeñas que en Fase 2-. Orden por
+dependencia real:
+
+1. **Modelo de estados de candidatura. Cerrada** el 2026-09-08 (ver
+   abajo).
+2. **Pipeline: tabla densa** -sustituye `/ofertas` por la pantalla
+   Pipeline de verdad, con filtros/orden sobre el estado de la rebanada 1.
+3. **Pipeline: mapa valor × probabilidad.**
+4. **Pipeline: kanban por etapa.**
+5. **Interacciones** -registro manual por candidatura, visible en la
+   pantalla Oferta-.
+6. **Recordatorios** -`follow_up_at` y su gestión-.
+7. **Pantalla Hoy** -la cola de decisiones, agregando 1-6-.
+8. **Bot de Telegram** -probablemente en dos sesiones cuando llegue:
+   ingesta y avisos por separado-.
+
+Sigue siendo razonable ajustar el troceo si la realidad no encaja al
+llegar a una rebanada concreta.
 
 ### Cómo se trabaja esta fase
 
-Mismas reglas que Fase 2: una rebanada, una sesión de Claude Code: cada
-rebanada de punta a punta, en su propia sesión nueva, con su propia
-entrada en `docs/decisions/fase-3-*.md` al cerrarla, y `NEXT_SESSION.md`
-reescrito con el estado comprobado antes de cerrar la sesión. Empezar
-proponiendo el diseño y esperando el visto bueno antes de escribir
-código -el patrón que funcionó en las cinco rebanadas de Fase 2-.
+Mismas reglas que Fase 2: una rebanada, una sesión de Claude Code, de
+punta a punta, con su propia entrada en `docs/decisions/fase-3-*.md` al
+cerrarla, y `NEXT_SESSION.md` reescrito con el estado comprobado antes de
+cerrar la sesión. Empezar proponiendo el diseño y esperando el visto
+bueno antes de escribir código.
+
+### Rebanada 1 — Modelo de estados de candidatura, cerrada el 2026-09-08
+
+A diferencia de toda Fase 2, **no toca el repositorio privado `Futuro` en
+ningún momento**: el estado de una candidatura es dato operativo propio
+de esta aplicación. El detalle completo, con el porqué de cada decisión,
+está en `docs/decisions/fase-3-estados-de-candidatura.md`.
+
+**Decisión de fondo:** tabla nueva, `offer_status_events` (migración
+`0004`), hermana de `applications` y no un `ALTER TABLE` aditivo sobre
+ella como anticipaba el docstring de Fase 1 M3. El estado
+(`research`/`preparing`/`submitted`/`interview`/`closed`, vocabulario de
+código cerrado en `docs/OFFER_DATA_CONTRACT.md`) empieza antes de que
+exista ninguna variante confirmada, y `applications.variant`/`cv_sha256`
+son `NOT NULL` desde el primer día: mezclar las dos cosas habría exigido
+hacerlos nullable. Cuelga de `capture_id`, append-only con el mismo
+trigger de inmutabilidad, "vigente" = la última fila por
+`(occurred_at DESC, id DESC)` -mismo patrón que `applications`-. Sin
+`submitted_at` ni columnas parecidas: son el `occurred_at` de la fila
+donde el estado tomó ese valor.
+
+Tres preguntas resueltas con Pablo antes de escribir código, las tres
+como se propusieron: transiciones libres sin máquina de estados en la
+base de datos; confirmar una variante no mueve el estado solo -gestos
+separados, hueco conocido y no bloqueante-; sin campo de texto libre en
+la transición -eso espera a la rebanada 5-.
+
+`futuro_api/pipeline/` es el paquete nuevo (vocabulario, modelo,
+repositorio, vistas); las rutas viven en `offers/router.py`, mismo
+patrón que ya sigue `applications`. `/ofertas` gana la etiqueta de
+estado por fila; `/ofertas/[id]` gana la sección «Estado de la
+candidatura», un botón por etapa sin desplegable, mismo criterio que
+`VariantOptionRow`.
+
+Verificado en esta máquina el 2026-09-08: `make check-api` limpio (484
+tests -19 nuevos-), `make migrate-check` limpio con la migración `0004`,
+`make check-web` limpio (17 tests), y `make e2e` con las 29 pruebas en
+verde -3 nuevas-. Hallazgo menor de la suite entera, no de esta rebanada,
+anotado en el documento de decisiones: dos marcas `ref-${Date.now()}` casi
+simultáneas pueden deduplicar dos capturas de pruebas distintas cuando se
+ejecutan muy pocas pruebas en paralelo; con la suite completa
+(`make e2e`, 5 workers) no se reprodujo.
+
+**Sin verificar, y no se puede desde aquí:** nada nuevo -esta rebanada no
+toca el repositorio privado ni la deploy key de escritura-.
+
+Siguiente: **rebanada 2 — Pipeline: tabla densa**, sustituyendo el
+listado plano de `/ofertas` por la pantalla Pipeline de verdad, con
+filtros/orden sobre el estado que esta rebanada acaba de introducir.

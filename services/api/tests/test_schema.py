@@ -855,3 +855,60 @@ async def test_deleting_a_capture_takes_its_dossier_too(
         await connection.execute(sa.text("SELECT count(*) FROM applications"))
     ).scalar_one()
     assert remaining == 0
+
+
+# ---------------------------------------------------------------------------
+# El estado de la candidatura (Fase 3, rebanada 1)
+# ---------------------------------------------------------------------------
+
+
+async def _insert_status_event(
+    connection: AsyncConnection, capture_id: uuid.UUID, status: str = "research"
+) -> uuid.UUID:
+    result = await connection.execute(
+        sa.text(
+            "INSERT INTO offer_status_events (capture_id, status) "
+            "VALUES (:capture, :status) RETURNING id"
+        ),
+        {"capture": capture_id, "status": status},
+    )
+    return result.scalar_one()  # type: ignore[no-any-return]
+
+
+async def test_the_status_history_is_immutable(connection: AsyncConnection) -> None:
+    """Cambiar de etapa es una fila nueva, no un `UPDATE`.
+
+    Mismo motivo que el dossier: sin el trigger, "empezó en `research` y
+    luego pasó a `preparing`" se convertiría en una sola fila que dice
+    `preparing`, y la línea de tiempo de qué etapa se alcanzó y cuándo
+    desaparecería.
+    """
+    capture_id = await _insert_capture(connection)
+    event_id = await _insert_status_event(connection, capture_id)
+    with pytest.raises(IntegrityError, match="inmutable"):
+        await connection.execute(
+            sa.text("UPDATE offer_status_events SET status = 'closed' WHERE id = :id"),
+            {"id": event_id},
+        )
+
+
+async def test_an_unknown_status_value_is_rejected(
+    connection: AsyncConnection,
+) -> None:
+    capture_id = await _insert_capture(connection)
+    with pytest.raises(IntegrityError):
+        await _insert_status_event(connection, capture_id, status="ghosted")
+
+
+async def test_deleting_a_capture_takes_its_status_history_too(
+    connection: AsyncConnection,
+) -> None:
+    capture_id = await _insert_capture(connection)
+    await _insert_status_event(connection, capture_id)
+    await connection.execute(
+        sa.text("DELETE FROM offer_captures WHERE id = :id"), {"id": capture_id}
+    )
+    remaining = (
+        await connection.execute(sa.text("SELECT count(*) FROM offer_status_events"))
+    ).scalar_one()
+    assert remaining == 0

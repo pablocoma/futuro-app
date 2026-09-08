@@ -7,6 +7,8 @@ import { Refresher } from "@/components/Refresher";
 import type { Assessment, Field, Gate, Offer, RequirementMatch } from "@/lib/api";
 import { getOffer } from "@/lib/api";
 import {
+  APPLICATION_STATUSES,
+  APPLICATION_STATUS_LABELS,
   ASSESSMENT_STATUS_LABELS,
   EFFORT_LABELS,
   GATE_STATUS_LABELS,
@@ -20,7 +22,7 @@ import {
   labelFor,
 } from "@/lib/labels";
 
-import { confirmVariant, requestAssessment } from "./actions";
+import { changeStatus, confirmVariant, requestAssessment } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -79,6 +81,8 @@ export default async function Page({
           <p className="text-sm text-ink2">Nota: {offer.capture.capture_note}</p>
         ) : null}
       </header>
+
+      <PipelineStatusSection captureId={offer.capture.id} status={offer.status} />
 
       {working ? (
         <p className="rounded-lg border border-acc/30 bg-acc/5 px-5 py-3 font-mono text-sm text-acc">
@@ -271,6 +275,66 @@ export default async function Page({
         </pre>
       </details>
     </main>
+  );
+}
+
+/**
+ * El estado de la candidatura (Fase 3, rebanada 1): un botón por etapa, la
+ * vigente marcada y sin botón propio.
+ *
+ * Sin desplegable: mismo criterio que `VariantOptionRow` más abajo -una fila
+ * por opción, no un `<select>`-, y sin orden forzado entre etapas: se puede
+ * marcar cualquiera desde cualquiera, a propósito (ver
+ * `pipeline/vocabularies.py`). No toca el dossier ni la puntuación: son
+ * gestos separados.
+ */
+function PipelineStatusSection({
+  captureId,
+  status,
+}: {
+  captureId: string;
+  status: Offer["status"];
+}) {
+  return (
+    <Section title="Estado de la candidatura">
+      <div className="flex flex-wrap items-center gap-2 px-5 py-4">
+        {APPLICATION_STATUSES.map((option) => (
+          <StatusOption
+            key={option}
+            captureId={captureId}
+            option={option}
+            isCurrent={option === status}
+          />
+        ))}
+      </div>
+    </Section>
+  );
+}
+
+function StatusOption({
+  captureId,
+  option,
+  isCurrent,
+}: {
+  captureId: string;
+  option: Offer["status"];
+  isCurrent: boolean;
+}) {
+  if (isCurrent) {
+    return (
+      <span className="rounded border border-pos/30 bg-pos/5 px-3 py-1.5 font-mono text-xs text-pos">
+        ✓ {APPLICATION_STATUS_LABELS[option]}
+      </span>
+    );
+  }
+  return (
+    <form action={changeStatus}>
+      <input type="hidden" name="capture_id" value={captureId} />
+      <input type="hidden" name="status" value={option} />
+      <button type="submit" className="btn-link">
+        {APPLICATION_STATUS_LABELS[option]}
+      </button>
+    </form>
   );
 }
 

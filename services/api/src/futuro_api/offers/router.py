@@ -37,6 +37,9 @@ from futuro_api.models import OfferCapture, VariantRecommendation
 from futuro_api.offers import repository as offers_repo
 from futuro_api.offers import views
 from futuro_api.offers import vocabularies as vocab
+from futuro_api.pipeline import repository as pipeline_repo
+from futuro_api.pipeline import views as pipeline_views
+from futuro_api.pipeline.vocabularies import DEFAULT_STATUS, ApplicationStatus
 
 router = APIRouter(prefix="/api/offers", tags=["offers"])
 
@@ -257,6 +260,42 @@ async def assess(
     )
 
 
+# ---------------------------------------------------------------------------
+# Estado de la candidatura (Fase 3, rebanada 1)
+# ---------------------------------------------------------------------------
+
+
+class ChangeStatusRequest(BaseModel):
+    status: ApplicationStatus
+
+
+@router.post(
+    "/{capture_id}/status",
+    status_code=status.HTTP_201_CREATED,
+    summary="Registra un cambio de etapa en el pipeline",
+)
+async def change_status(
+    capture_id: uuid.UUID,
+    payload: ChangeStatusRequest,
+    session: SessionDep,
+) -> pipeline_views.StatusEventView:
+    """Añade una transición a la línea de tiempo del estado.
+
+    Sin orden forzado: cualquier etapa a cualquier otra es válida -ver
+    `pipeline/vocabularies.py`-. No mueve nada más: confirmar una variante en
+    `/dossier` sigue sin tocar esto, decisión explícita de esta rebanada.
+    """
+    capture = await session.get(OfferCapture, capture_id)
+    if capture is None:
+        raise HTTPException(status_code=404, detail="esa oferta no existe")
+
+    event = await pipeline_repo.record_status(
+        session, capture_id=capture_id, status=payload.status
+    )
+    await session.commit()
+    return pipeline_views.status_event_view(event)
+
+
 def _loaded_data_repo(request: Request) -> data_repo.DataRepo:
     """El repositorio de datos cargado, o un 503 con el motivo.
 
@@ -447,6 +486,7 @@ async def list_offers(
     runs = await jobs_repo.latest_runs_for(
         session, capture_ids, kind=jobs_vocab.JobKind.OFFER_EXTRACTION
     )
+    statuses = await pipeline_repo.current_statuses_for(session, capture_ids)
 
     summaries = []
     for capture in captures:
@@ -466,6 +506,7 @@ async def list_offers(
                 company=company,
                 posting_status=extraction.posting_status if extraction else None,
                 extraction_status=views.status_of(runs.get(capture.id), extraction),
+                status=statuses.get(capture.id, DEFAULT_STATUS),
             )
         )
     return summaries
@@ -495,6 +536,11 @@ class OfferDetail(views.OfferView):
     # puede leer: la pantalla lo distingue enseñando el motivo, no lanzando
     # un error que tumbe el resto del detalle.
     available_variants: tuple[str, ...] = ()
+    # El estado vigente del pipeline y su historial completo -de la más
+    # reciente a la más antigua-. `research` sin ninguna fila no es un
+    # error: ver `pipeline/repository.py::current_status`.
+    status: ApplicationStatus = DEFAULT_STATUS
+    status_history: list[pipeline_views.StatusEventView] = []
 
 
 @router.get("/{capture_id}", summary="Una oferta con lo que se extrajo de ella")
@@ -544,6 +590,8 @@ async def get_offer(
         session, capture_id, kind=jobs_vocab.JobKind.OFFER_ASSESSMENT
     )
     application = await applications_repo.current_application(session, capture_id)
+    current_status = await pipeline_repo.current_status(session, capture_id)
+    history = await pipeline_repo.status_history(session, capture_id)
     assessment_status = views.status_of(assessment_run, assessment)
     if assessment is not None and extraction is not None:
         assessment_view = assessment_views.assessment_view(
@@ -576,6 +624,8 @@ async def get_offer(
             else None
         ),
         available_variants=_available_variants(request),
+        status=current_status,
+        status_history=[pipeline_views.status_event_view(e) for e in history],
         # Solo se enseña el error cuando el trabajo acabó mal: mientras se
         # reintenta, el error del intento anterior confundiría más que
         # ayudar.

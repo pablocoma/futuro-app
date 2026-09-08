@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 import { listOffers } from "@/lib/api";
-import { STATUS_LABELS } from "@/lib/labels";
+import { APPLICATION_STATUS_LABELS, STATUS_LABELS } from "@/lib/labels";
 
 export const dynamic = "force-dynamic";
 
@@ -9,8 +9,9 @@ export const dynamic = "force-dynamic";
  * Listado mínimo, para que una oferta siga siendo alcanzable al recargar.
  *
  * La pantalla Pipeline de `docs/APP_SCREENS.md` —tabla densa, mapa valor ×
- * probabilidad, kanban— necesita el scoring, que es M2. Esto es solo la
- * puerta a la pantalla de una oferta.
+ * probabilidad, kanban— es Fase 3, rebanadas 2-4. Esto sigue siendo solo la
+ * puerta a la pantalla de una oferta, con el estado de la candidatura
+ * (Fase 3, rebanada 1) ya visible en cada fila.
  */
 export default async function Page() {
   const offers = await listOffers();
@@ -56,7 +57,10 @@ export default async function Page() {
                     {offer.company ?? "—"}
                   </span>
                 </span>
-                <span className="shrink-0 font-mono text-xs text-ink2">
+                <span className="flex shrink-0 items-center gap-3 font-mono text-xs text-ink2">
+                  <span className="text-acc">
+                    {APPLICATION_STATUS_LABELS[offer.status]}
+                  </span>
                   {STATUS_LABELS[offer.extraction_status] ??
                     offer.extraction_status}
                 </span>

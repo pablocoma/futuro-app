@@ -24,6 +24,7 @@ from futuro_api.jobs import vocabularies as jobs_vocab
 from futuro_api.models import JobRun, OfferCapture, OfferExtraction
 from futuro_api.offers import schemas
 from futuro_api.offers import vocabularies as vocab
+from futuro_api.pipeline.vocabularies import ApplicationStatus
 
 IDENTIFICATION_FIELDS: tuple[str, ...] = tuple(schemas.Identification.model_fields)
 COMPENSATION_FIELDS: tuple[str, ...] = tuple(
@@ -145,6 +146,11 @@ class OfferSummaryView(BaseModel):
     company: str | None = None
     posting_status: vocab.PostingStatus | None = None
     extraction_status: ExtractionStatus
+    # El estado del pipeline vive en su propia tabla (`pipeline/models.py`),
+    # no en ninguna capa del contrato de oferta: por eso este campo importa
+    # el vocabulario directamente en vez de heredarlo de un `OfferView` que
+    # no sabe nada de candidaturas, mismo criterio que `jobs_vocab` arriba.
+    status: ApplicationStatus
 
 
 def readable(value: Any) -> Any:

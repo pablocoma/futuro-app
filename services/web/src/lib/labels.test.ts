@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  APPLICATION_STATUS_LABELS,
   BULLET_CV_USAGE_LABELS,
   BULLET_EVIDENCE_STATUS_LABELS,
   EFFORT_LABELS,
@@ -69,6 +70,15 @@ describe("etiquetas de la puntuación", () => {
       "blocked",
       "conditional",
       "eligible_with_internal_policy_check",
+    ]);
+    // Fase 3, rebanada 1: el estado de una candidatura, cerrado en
+    // `pipeline/vocabularies.py` -no en el repositorio privado-.
+    expect(Object.keys(APPLICATION_STATUS_LABELS).sort()).toEqual([
+      "closed",
+      "interview",
+      "preparing",
+      "research",
+      "submitted",
     ]);
   });
 

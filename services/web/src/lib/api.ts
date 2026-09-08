@@ -212,6 +212,28 @@ export type ExtractionStatus =
   | "succeeded"
   | "failed";
 
+/**
+ * El estado de una candidatura (Fase 3, rebanada 1). Vocabulario de
+ * **código** -`pipeline/vocabularies.py`, no el repositorio privado-,
+ * cerrado en `docs/OFFER_DATA_CONTRACT.md`.
+ *
+ * Vive en su propia línea de tiempo, separada del dossier
+ * (`Application`): empieza en `research`, antes de que exista ninguna
+ * variante confirmada, así que no podía ser una columna de esa tabla. Sin
+ * orden forzado entre valores -cualquier transición es válida-.
+ */
+export type ApplicationStatus =
+  | "research"
+  | "preparing"
+  | "submitted"
+  | "interview"
+  | "closed";
+
+export type StatusEvent = {
+  status: ApplicationStatus;
+  occurred_at: string;
+};
+
 export type Offer = {
   capture: {
     id: string;
@@ -235,6 +257,10 @@ export type Offer = {
   application: Application | null;
   /** Vacía si el repositorio de datos no está configurado o no se puede leer. */
   available_variants: string[];
+  /** `research` sin ningún evento no es un error: es el valor implícito. */
+  status: ApplicationStatus;
+  /** De la más reciente a la más antigua. Vacío si nunca se ha cambiado. */
+  status_history: StatusEvent[];
 };
 
 export type OfferSummary = {
@@ -244,6 +270,7 @@ export type OfferSummary = {
   company: string | null;
   posting_status: string | null;
   extraction_status: ExtractionStatus;
+  status: ApplicationStatus;
 };
 
 export type IngestResult = {
@@ -377,6 +404,18 @@ export function confirmVariant(
   variant: string,
 ): Promise<PostResult<Application>> {
   return apiPost<Application>(`/api/offers/${id}/dossier`, { variant });
+}
+
+/**
+ * Registra un cambio de etapa. Nunca sobrescribe la anterior -la API crea
+ * una fila nueva en la línea de tiempo-, y no mueve nada más: confirmar una
+ * variante en `confirmVariant` es un gesto aparte, a propósito.
+ */
+export function changeStatus(
+  id: string,
+  status: ApplicationStatus,
+): Promise<PostResult<StatusEvent>> {
+  return apiPost<StatusEvent>(`/api/offers/${id}/status`, { status });
 }
 
 /**

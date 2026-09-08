@@ -769,6 +769,28 @@ async def test_confirming_a_variant_records_the_dossier(
     assert detail["application"]["variant"] == "cartografia_nautica"
 
 
+async def test_confirming_a_variant_does_not_move_the_pipeline_status(
+    api_with_data_repo: tuple[TestClient, FakeQueue],
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    """El dossier y el estado de la candidatura son cosas separadas (Fase 3).
+
+    Confirmar una variante no avanza el estado solo: es una decisión
+    explícita de la rebanada que introdujo `offer_status_events`, no un
+    descuido. Cambiar de etapa sigue siendo un gesto aparte, en
+    `/api/offers/{id}/status`.
+    """
+    client, _ = api_with_data_repo
+    capture_id = await _extracted_and_scored(client, sessions)
+
+    client.post(
+        f"/api/offers/{capture_id}/dossier", json={"variant": "cartografia_nautica"}
+    )
+
+    detail = client.get(f"/api/offers/{capture_id}").json()
+    assert detail["status"] == "research"
+
+
 async def test_confirming_a_variant_without_a_recommendation_leaves_it_null(
     api_with_data_repo: tuple[TestClient, FakeQueue],
     sessions: async_sessionmaker[AsyncSession],

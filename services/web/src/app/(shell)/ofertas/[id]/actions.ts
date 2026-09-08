@@ -2,7 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 
-import { assessOffer, confirmVariant as confirmVariantCall } from "@/lib/api";
+import type { ApplicationStatus } from "@/lib/api";
+import {
+  assessOffer,
+  changeStatus as changeStatusCall,
+  confirmVariant as confirmVariantCall,
+} from "@/lib/api";
 
 /**
  * Pide puntuar una oferta otra vez.
@@ -50,5 +55,21 @@ export async function confirmVariant(formData: FormData): Promise<void> {
     return;
   }
   await confirmVariantCall(id, variant);
+  revalidatePath(`/ofertas/${id}`);
+}
+
+/**
+ * Cambia la etapa del pipeline de una oferta.
+ *
+ * Mismo patrón que `confirmVariant`, y a propósito no toca el dossier: son
+ * dos cosas separadas desde la rebanada que introdujo el estado (Fase 3).
+ */
+export async function changeStatus(formData: FormData): Promise<void> {
+  const id = String(formData.get("capture_id") ?? "");
+  const value = String(formData.get("status") ?? "");
+  if (!id || !value) {
+    return;
+  }
+  await changeStatusCall(id, value as ApplicationStatus);
   revalidatePath(`/ofertas/${id}`);
 }

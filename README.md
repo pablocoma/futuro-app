@@ -83,8 +83,19 @@ documenta en prosa umbrales que en realidad decide a mano
 base económica, bandas de probabilidad, orden de esfuerzo) es editable—
 están cerradas y verificadas en esta máquina, con `/perfil` ya en ocho
 pestañas. Pendiente de aprovisionar a mano en producción: la deploy key
-de lectura-escritura (`docs/deployment.md` §10). Siguiente: Fase 3 —
-pipeline y seguimiento.
+de lectura-escritura (`docs/deployment.md` §10).
+
+**Fase 3 — pipeline y seguimiento — en curso**, en ocho rebanadas
+(troceo y estado en `NEXT_SESSION.md`). A diferencia de Fase 2, no toca
+el repositorio privado. Su **rebanada 1 —modelo de estados de
+candidatura— está cerrada**: una línea de tiempo propia
+(`offer_status_events`, migración `0004`) con los cinco estados de
+`docs/OFFER_DATA_CONTRACT.md` (`research`, `preparing`, `submitted`,
+`interview`, `closed`), separada a propósito del dossier de variante
+confirmada de Fase 1 M3 —el estado empieza antes de que exista ninguna
+variante—, sin orden de transición forzado y sin mover nada al confirmar
+una variante. `/ofertas` y `/ofertas/[id]` ya lo enseñan y lo cambian.
+Siguiente: rebanada 2, la pantalla Pipeline de verdad (tabla densa).
 
 ## Desarrollo local
 

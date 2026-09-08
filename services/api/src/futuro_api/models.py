@@ -31,6 +31,7 @@ from futuro_api.offers.models import (
     OfferExtraction,
     OfferRequirement,
 )
+from futuro_api.pipeline.models import OfferStatusEvent
 
 __all__ = [
     "Application",
@@ -44,6 +45,7 @@ __all__ = [
     "OfferCapture",
     "OfferExtraction",
     "OfferRequirement",
+    "OfferStatusEvent",
     "RequirementMatchRow",
     "VariantRecommendation",
 ]
