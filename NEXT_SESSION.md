@@ -814,7 +814,7 @@ bueno antes de escribir código.
 A diferencia de toda Fase 2, **no toca el repositorio privado `Futuro` en
 ningún momento**: el estado de una candidatura es dato operativo propio
 de esta aplicación. El detalle completo, con el porqué de cada decisión,
-está en `docs/decisions/fase-3-estados-de-candidatura.md`.
+está en `docs/decisions/fase-3-pipeline-y-seguimiento.md`.
 
 **Decisión de fondo:** tabla nueva, `offer_status_events` (migración
 `0004`), hermana de `applications` y no un `ALTER TABLE` aditivo sobre

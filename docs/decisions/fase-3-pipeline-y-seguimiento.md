@@ -1,17 +1,20 @@
-# Fase 3 — Estados de candidatura
+# Fase 3 — Pipeline y seguimiento
 
-Ver `NEXT_SESSION.md` para el troceo completo de Fase 3 (ocho rebanadas,
-acordado con Pablo el 2026-09-08) y `ARCHITECTURE.md` (repositorio privado)
-§14 para el alcance de la fase: «estados, interacciones, recordatorios y el
-bot de Telegram avisando e ingiriendo ofertas». Este documento recoge solo
-las decisiones de la primera rebanada.
+Ver `ARCHITECTURE.md` (repositorio privado `Futuro`) §14 para el alcance de
+la fase: «estados, interacciones, recordatorios y el bot de Telegram
+avisando e ingiriendo ofertas». El troceo en ocho rebanadas se acordó con
+Pablo el 2026-09-08 y está en `NEXT_SESSION.md`. Este documento recoge solo
+las decisiones de implementación tomadas aquí, y se amplía con cada
+rebanada, mismo criterio que `docs/decisions/fase-2-perfil-editable.md`.
+
+## 2026-09-08 — Rebanada 1, modelo de estados de candidatura
 
 A diferencia de toda Fase 2, **esta rebanada no toca el repositorio privado
 `Futuro` en ningún momento**: el estado de una candidatura es dato operativo
 propio de esta aplicación, no un YAML de perfil. No hay `pull --rebase`, no
 hay `git_ops.py`, no hay deploy key de escritura implicada.
 
-## La investigación, antes de diseñar
+### La investigación, antes de diseñar
 
 - `docs/APP_SCREENS.md` (repositorio privado) §Pipeline y §Hoy: Pipeline
   describe tres vistas intercambiables (tabla densa, mapa valor ×
@@ -31,7 +34,7 @@ hay `git_ops.py`, no hay deploy key de escritura implicada.
   `follow_up_at`/`outcome` con un `ALTER TABLE` aditivo sobre esa misma
   tabla.
 
-## La decisión de fondo: tabla propia, no `ALTER TABLE` sobre `applications`
+### La decisión de fondo: tabla propia, no `ALTER TABLE` sobre `applications`
 
 Se revisa la nota de M3 y no se sigue. El estado de una candidatura -según
 `docs/OFFER_DATA_CONTRACT.md`, `research → preparing → submitted →
@@ -52,7 +55,7 @@ tomó ese valor, y lo mismo valdría para un futuro `interview_at` sin tocar
 el esquema. Migración `0004`, con el docstring explicando la desviación
 frente a lo que anticipaba `0003`.
 
-## Tres preguntas resueltas con Pablo antes de escribir código
+### Tres preguntas resueltas con Pablo antes de escribir código
 
 - **Transiciones libres, sin máquina de estados en la base de datos.**
   Cualquier valor a cualquier otro es válido -de `research` directo a
@@ -71,7 +74,7 @@ frente a lo que anticipaba `0003`.
   nota rápida: quedan para cuando llegue la rebanada de interacciones
   (Fase 3, rebanada 5), que es donde vive ese concepto.
 
-## El mecanismo
+### El mecanismo
 
 `futuro_api/pipeline/` es un paquete nuevo -`vocabularies.py`
 (`ApplicationStatus`, vocabulario de código sin ningún YAML detrás),
@@ -99,7 +102,7 @@ las demás son un `<form>` con acción de servidor, sin JavaScript propio.
 `/ofertas` gana la etiqueta de estado junto a la de extracción en cada
 fila.
 
-## Verificado en esta máquina, 2026-09-08
+### Verificado en esta máquina, 2026-09-08
 
 `make check-api` limpio (484 tests -19 nuevos: 6 de repositorio, 8 de
 router, 1 de que confirmar variante no mueve el estado, 3 de esquema-
@@ -126,9 +129,11 @@ entera de marcado, no algo que esta rebanada introdujera; conviene tenerlo
 presente si algún día `make e2e` empieza a fallar de forma intermitente en
 un test con `ref-${Date.now()}`.
 
-## Deliberadamente fuera de esta rebanada
+### Deliberadamente fuera de esta rebanada
 
-- Las vistas de mapa y kanban de Pipeline (rebanada 2).
+- La pantalla Pipeline en sí -tabla densa (rebanada 2), mapa valor ×
+  probabilidad y kanban por etapa (rebanadas 3-4)-: esta rebanada solo
+  puso el dato y un control mínimo en `/ofertas`/`/ofertas/[id]`.
 - Cualquier nota o motivo asociado a una transición (rebanada 5,
   interacciones).
 - `follow_up_at` y recordatorios (rebanada 6).
