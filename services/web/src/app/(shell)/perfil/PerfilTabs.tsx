@@ -10,6 +10,7 @@ import type {
   Preferences,
   ProjectCatalog,
   RoleVariantContent,
+  ScoringModel,
 } from "@/lib/api";
 
 import { BulletBankForm } from "./BulletBankForm";
@@ -19,6 +20,7 @@ import { ObjectivesForm } from "./ObjectivesForm";
 import { PreferencesForm } from "./PreferencesForm";
 import { ProjectCatalogForm } from "./ProjectCatalogForm";
 import { RoleVariantsForm } from "./RoleVariantsForm";
+import { ScoringModelForm } from "./ScoringModelForm";
 
 type Tab =
   | "objetivos"
@@ -27,7 +29,8 @@ type Tab =
   | "bullets"
   | "variantes"
   | "variantes_cv"
-  | "catalogo";
+  | "catalogo"
+  | "scoring";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "objetivos", label: "Objetivos" },
@@ -37,10 +40,11 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "variantes", label: "Variantes de rol" },
   { id: "variantes_cv", label: "Variantes de CV" },
   { id: "catalogo", label: "Catálogo de proyectos" },
+  { id: "scoring", label: "Modelo de scoring" },
 ];
 
 /**
- * Las siete vistas de `/perfil`, alternadas con un selector arriba sin
+ * Las ocho vistas de `/perfil`, alternadas con un selector arriba sin
  * cambiar de URL -mismo patrón que `docs/APP_SCREENS.md` documenta para
  * Pipeline/CVs/Stats-. Cada pestaña es un fichero YAML distinto con su
  * propio ciclo diff/commit independiente; cambiar de pestaña no descarta
@@ -55,6 +59,7 @@ export function PerfilTabs({
   roleVariants,
   cvVariants,
   projectCatalog,
+  scoringModel,
 }: {
   objectives: Objectives;
   preferences: Preferences;
@@ -63,6 +68,7 @@ export function PerfilTabs({
   roleVariants: RoleVariantContent;
   cvVariants: CvVariants;
   projectCatalog: ProjectCatalog;
+  scoringModel: ScoringModel;
 }) {
   const [tab, setTab] = useState<Tab>("objetivos");
 
@@ -87,6 +93,7 @@ export function PerfilTabs({
       {tab === "variantes" && <RoleVariantsForm current={roleVariants} />}
       {tab === "variantes_cv" && <CvVariantsForm current={cvVariants} />}
       {tab === "catalogo" && <ProjectCatalogForm current={projectCatalog} />}
+      {tab === "scoring" && <ScoringModelForm current={scoringModel} />}
     </div>
   );
 }

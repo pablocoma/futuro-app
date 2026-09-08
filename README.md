@@ -60,8 +60,8 @@ falla. Lo que hay que provisionar a mano —y las trampas que tiene— está en
 `docs/deployment.md`; los valores concretos viven en el repositorio
 privado, nunca aquí.
 
-En curso, Fase 2 — perfil editable, la primera que escribe en el
-repositorio privado, en cinco rebanadas (troceo en `NEXT_SESSION.md`). El
+**Fase 2 — perfil editable — completa**, la primera que escribe en el
+repositorio privado, en cinco rebanadas (detalle en `NEXT_SESSION.md`). El
 shell mínimo (barra lateral/inferior con Pipeline, Capturar y Perfil), M0
 —el mecanismo de escritura entero, demostrado sobre
 `config/objectives.yaml`: `pull --rebase`, `ruamel.yaml`, validación
@@ -70,15 +70,21 @@ conflicto sin forzar nada—, M1 —el mismo mecanismo generalizado a
 `config/preferences.yaml` y `config/constraints.yaml`—, M2 —el banco de
 bullets (`cv/content/professional_bullet_bank.yaml`) y el contenido de
 variantes de rol (`cv/content/role_variant_content.yaml`), con las
-`claim_rules` de `config/cv_variants.yaml` validadas también al guardar—
-y M3 —`config/cv_variants.yaml` (`base_variants`, con `claim_rules` y
+`claim_rules` de `config/cv_variants.yaml` validadas también al guardar—,
+M3 —`config/cv_variants.yaml` (`base_variants`, con `claim_rules` y
 `fixed_sections` de solo lectura) y `profile/project_catalog.yaml`
 (primera vez que esta app lo lee o escribe), con la primera validación
 cruzada de verdad entre los cuatro ficheros que tocan las dos últimas
-rebanadas— están cerrados y verificados en esta máquina, con `/perfil`
-ya en siete pestañas. Pendiente de aprovisionar a mano en producción: la
-deploy key de lectura-escritura (`docs/deployment.md` §10). Siguiente:
-M4.
+rebanadas— y **M4** —`config/scoring_model.yaml`, la más delicada: decide
+qué variante de CV se recomienda en producción, así que el bloque que
+documenta en prosa umbrales que en realidad decide a mano
+`assessment/scoring.py` queda de solo lectura, mismo criterio que
+`claim_rules`/`fixed_sections`; el resto (dimensiones, filtros, línea
+base económica, bandas de probabilidad, orden de esfuerzo) es editable—
+están cerradas y verificadas en esta máquina, con `/perfil` ya en ocho
+pestañas. Pendiente de aprovisionar a mano en producción: la deploy key
+de lectura-escritura (`docs/deployment.md` §10). Siguiente: Fase 3 —
+pipeline y seguimiento.
 
 ## Desarrollo local
 

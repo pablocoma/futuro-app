@@ -1,0 +1,158 @@
+# Modelo de scoring INVENTADO, para el harness de escritura de la API.
+#
+# Imita la forma de config/scoring_model.yaml del repositorio privado y no
+# comparte ni un dato con él: otra persona, otro puerto, otras cifras. Tres
+# dimensiones y no seis, dos filtros y no cuatro, con nombres inventados en
+# los dos casos -si algún test pasa por casualidad porque alguien escribió
+# en el código el nombre de una dimensión o un filtro real, aquí se caerá-.
+#
+# `invented_dimension_two` declara solo tres anclas (0, 3, 5) y no las
+# cuatro habituales: a propósito, para probar que el modelo exige "al
+# menos un nivel numérico" y no "los cuatro niveles".
+#
+# `invented_gate_two` declara dos criterios con nombres libres
+# (`pass_a`/`pass_b`) además de `pending`, como `savings_floor` hace en el
+# repositorio real con `pass_spain`/`pass_abroad`: los filtros no tienen un
+# juego fijo de estados posibles.
+
+version: 3
+status: active
+updated_at: 2026-08-20
+
+description: >-
+  Modelo de comparación INVENTADO, harness de escritura.
+
+baseline_puerto_inventado:
+  gross_annual_eur: 24000
+  payments_per_year: 12
+  net_monthly_eur: 1600
+  net_annual_eur: 19200
+  living_costs_monthly_eur: [350, 450]
+  annual_savings_eur: [13800, 14800]
+  reference_savings_eur: 14000
+  savings_rate: 0.70
+  cause: >-
+    Motivo inventado de por qué ahorra tanto quedándose donde está.
+  implication: >-
+    Implicación inventada de lo que un puesto internacional tendría que
+    batir para compensar la mudanza.
+  updated_at: 2026-08-18
+
+weights:
+  invented_dimension_one: 30
+  invented_dimension_two: 25
+  invented_dimension_three: 45
+
+scale:
+  range: [0, 5]
+  granularity: 1
+  rationale: >-
+    Motivo inventado de por qué la escala tiene cinco niveles.
+
+anchors:
+  invented_dimension_one:
+    assumption: >-
+      Supuesto inventado de la primera dimensión.
+    0: Ancla inventada de nivel 0 para la primera dimensión.
+    1: Ancla inventada de nivel 1 para la primera dimensión.
+    3: Ancla inventada de nivel 3 para la primera dimensión.
+    5: Ancla inventada de nivel 5 para la primera dimensión.
+
+  invented_dimension_two:
+    0: Ancla inventada de nivel 0 para la segunda dimensión.
+    3: Ancla inventada de nivel 3 para la segunda dimensión.
+    5: Ancla inventada de nivel 5 para la segunda dimensión.
+
+  invented_dimension_three:
+    note: >-
+      Nota inventada de la tercera dimensión.
+    0: Ancla inventada de nivel 0 para la tercera dimensión.
+    1: Ancla inventada de nivel 1 para la tercera dimensión.
+    3: Ancla inventada de nivel 3 para la tercera dimensión.
+    5: Ancla inventada de nivel 5 para la tercera dimensión.
+
+probability_bands:
+  high: >-
+    Texto inventado de banda de probabilidad alta.
+  medium: >-
+    Texto inventado de banda de probabilidad media.
+  low: >-
+    Texto inventado de banda de probabilidad baja.
+  very_low: >-
+    Texto inventado de banda de probabilidad muy baja.
+
+portfolio_assignment:
+  realistic: probabilidad high y valor >= 3.0
+  realistic_stretch: probabilidad medium y valor >= 3.0
+  aspirational: probabilidad low o very_low y valor >= 3.0
+  experimental: familia fuera de objectives.role_families.core
+  discard: valor < 3.0, con independencia de la probabilidad
+  note: >-
+    Nota inventada, de solo lectura: documenta un orden de evaluación que en
+    realidad decide a mano assessment/scoring.py.
+
+portfolio_policy:
+  realistic: 0.40
+  realistic_stretch: 0.35
+  aspirational: 0.20
+  experimental: 0.05
+  status: descriptive
+  note: >-
+    Nota inventada de la política de cartera, descriptiva y no prescriptiva.
+
+gates:
+  invented_gate_one:
+    pass: Criterio inventado de paso del primer filtro.
+    fail: Criterio inventado de fallo del primer filtro.
+
+  invented_gate_two:
+    context: >-
+      Contexto inventado del segundo filtro.
+    pass_a: Criterio inventado A del segundo filtro.
+    pass_b: Criterio inventado B del segundo filtro.
+    pending: Criterio inventado de pendiente del segundo filtro.
+
+missing_data:
+  rule: renormalize
+  method: >-
+    Método inventado de reparto de pesos entre dimensiones sin datos.
+  coverage: Descripción inventada de qué es la cobertura.
+  minimum_coverage: 0.55
+  below_minimum: >-
+    Descripción inventada de qué pasa por debajo del mínimo de cobertura.
+  never: >-
+    Regla inventada de qué nunca se estima para rellenar una nota.
+
+output:
+  required_fields:
+    - value_score
+    - coverage
+    - probability_band
+    - portfolio_bucket
+    - gates_status
+    - effort_tier
+    - unscored_dimensions
+
+  effort_tier:
+    evaluation_order: [skip, cheap, full, standard]
+    note: >-
+      Nota inventada del orden de evaluación, de solo lectura.
+    full:
+      when: Condición inventada del nivel full.
+      do: Acción inventada del nivel full.
+    standard:
+      when: Condición inventada del nivel standard.
+      do: Acción inventada del nivel standard.
+    cheap:
+      when: Condición inventada del nivel cheap.
+      do: Acción inventada del nivel cheap.
+    skip:
+      when: Condición inventada del nivel skip.
+      do: Acción inventada del nivel skip.
+
+notes:
+  - >-
+    Primera nota inventada, de varias líneas para probar que el plegado
+    sobrevive a una escritura que no la toca.
+  - >-
+    Segunda nota inventada, más corta.

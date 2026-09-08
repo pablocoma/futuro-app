@@ -6,6 +6,7 @@ import {
   getPreferences,
   getProjectCatalog,
   getRoleVariants,
+  getScoringModel,
 } from "@/lib/api";
 
 import { PerfilTabs } from "./PerfilTabs";
@@ -15,16 +16,17 @@ export const dynamic = "force-dynamic";
 /**
  * Fase 2, M0 (`objectives.yaml`), M1 (`preferences.yaml`,
  * `constraints.yaml`), M2 (`professional_bullet_bank.yaml`,
- * `role_variant_content.yaml`) y M3 (`cv_variants.yaml`,
- * `project_catalog.yaml`): siete ficheros, siete formularios, una sola
- * pantalla con pestañas -`PerfilTabs`-. Los siete `get*` ya hacen `pull
- * --rebase` antes de devolver nada -ver `data_repo_write/router.py`-, así
- * que cada formulario arranca sobre lo último que hay en el remoto, no
- * sobre una copia local vieja.
+ * `role_variant_content.yaml`), M3 (`cv_variants.yaml`,
+ * `project_catalog.yaml`) y M4 (`scoring_model.yaml`, la última rebanada
+ * de Fase 2): ocho ficheros, ocho formularios, una sola pantalla con
+ * pestañas -`PerfilTabs`-. Los ocho `get*` ya hacen `pull --rebase` antes
+ * de devolver nada -ver `data_repo_write/router.py`-, así que cada
+ * formulario arranca sobre lo último que hay en el remoto, no sobre una
+ * copia local vieja.
  *
- * Los siete cuelgan del mismo clon de lectura-escritura, así que si uno
+ * Los ocho cuelgan del mismo clon de lectura-escritura, así que si uno
  * falla -sin configurar, repositorio inalcanzable- los otros también: se
- * enseña un único aviso en vez de siete.
+ * enseña un único aviso en vez de ocho.
  */
 export default async function Page() {
   const [
@@ -35,6 +37,7 @@ export default async function Page() {
     roleVariants,
     cvVariants,
     projectCatalog,
+    scoringModel,
   ] = await Promise.all([
     getObjectives(),
     getPreferences(),
@@ -43,6 +46,7 @@ export default async function Page() {
     getRoleVariants(),
     getCvVariants(),
     getProjectCatalog(),
+    getScoringModel(),
   ]);
 
   const ready =
@@ -52,7 +56,8 @@ export default async function Page() {
     bulletBank !== null &&
     roleVariants !== null &&
     cvVariants !== null &&
-    projectCatalog !== null;
+    projectCatalog !== null &&
+    scoringModel !== null;
 
   return (
     <main className="mx-auto max-w-3xl space-y-8 px-6 py-12">
@@ -77,6 +82,7 @@ export default async function Page() {
           roleVariants={roleVariants}
           cvVariants={cvVariants}
           projectCatalog={projectCatalog}
+          scoringModel={scoringModel}
         />
       )}
     </main>

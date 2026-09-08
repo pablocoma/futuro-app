@@ -1,13 +1,14 @@
 # Traspaso a la siguiente sesión
 
-Última actualización: 2026-09-07. Fase 1 completa de punta a punta (M0-M3,
-desplegada el 2026-09-05). Fase 2 arrancó el 2026-09-06 con el shell
-mínimo y M0 (`config/objectives.yaml`); M1 (`preferences.yaml`,
-`constraints.yaml`) cerrada el 2026-09-07; M2 (el banco de bullets y el
-contenido de variantes de rol) cerrada el mismo 2026-09-07; M3
-(`config/cv_variants.yaml` y `profile/project_catalog.yaml`, la primera
-rebanada con validación cruzada de verdad entre ficheros) cerrada
-también el 2026-09-07 — ver más abajo. M4 es el siguiente objetivo.
+Última actualización: 2026-09-08. Fase 1 completa de punta a punta (M0-M3,
+desplegada el 2026-09-05). **Fase 2 completa de punta a punta**: shell
+mínimo y M0 (`config/objectives.yaml`, 2026-09-06); M1 (`preferences.yaml`,
+`constraints.yaml`, 2026-09-07); M2 (el banco de bullets y el contenido de
+variantes de rol, 2026-09-07); M3 (`config/cv_variants.yaml` y
+`profile/project_catalog.yaml`, la primera rebanada con validación cruzada
+de verdad entre ficheros, 2026-09-07); M4 (`config/scoring_model.yaml`, la
+más delicada, cierra Fase 2 entera, 2026-09-08) — ver más abajo. Siguiente
+objetivo principal: **Fase 3 — Pipeline y seguimiento**.
 
 Este archivo contiene el estado operativo del proyecto. Las reglas duraderas
 están en `AGENTS.md`; no deben duplicarse aquí.
@@ -665,38 +666,115 @@ ya documentaron-.
 deploy key de verdad y el directorio en la VM de producción-, sin
 cambios desde entonces.
 
-## Siguiente objetivo: Fase 2 · M4
+### M4 — `config/scoring_model.yaml`, cierra Fase 2, cerrada el 2026-09-08
 
-- **M4 — `config/scoring_model.yaml`**, el más grande y el más delicado:
-  309 líneas, 15 claves de primer nivel, mezcla reglas estructuradas con
-  notas en prosa libre (`assumption`/`note`), y es el que de verdad decide
-  qué variante de CV se recomienda en producción. Se deja para el final a
-  propósito. Antes de abrirlo al editor genérico, conviene decidir si
-  necesita un tratamiento aparte —por ejemplo, exigir que los tres
-  hallazgos que M2 de Fase 1 dejó como interpretación del código
-  (`very_low` → `aspirational`, el orden de evaluación de los filtros, el
-  estrechamiento de `cheap`) ya estén declarados en el propio YAML antes de
-  dejar que la UI lo edite, para no abrir una vía por la que se escriba
-  algo que `assessment/scoring.py` no sepa interpretar.
+Investigado antes de escribir código: seguía en v2 (309 líneas, 15 claves
+de primer nivel), sin tocar desde el cierre de Fase 1 M2. Las tres
+interpretaciones que Fase 1 M2 dejó como código sin declarar en el YAML
+-`very_low` → `aspirational`, el orden de evaluación de los cubos, el
+estrechamiento de `cheap`- siguen, las tres, confirmadas en prosa dentro
+de `portfolio_assignment.note`/`output.effort_tier.note` y no en forma
+legible por máquina; ninguna pasó a ser un dato que el código lea. Hallazgo
+no previsto: la nota de `cheap` seguía diciendo «pendiente de implementar
+en futuro-app» dos días después de que `scoring.py` ya lo implementara -una
+prueba en vivo de que la prosa puede desincronizarse de la realidad sin que
+nadie lo note-.
 
-**Deliberadamente fuera de esta troceo:** `profile/master_profile.md`,
+**Decidido con Pablo el 2026-09-08, la opción recomendada de las tres
+planteadas**: el bloque que documenta en prosa umbrales que en realidad
+decide a mano `assessment/scoring.py` (`portfolio_assignment` entero,
+cada nivel de `output.effort_tier`, `missing_data.rule/method/coverage/
+below_minimum`, `output.required_fields`) queda de solo lectura, mismo
+criterio que `claim_rules`/`fixed_sections` en M3 -abrirlo a edición no
+cambiaría el cálculo real, solo el riesgo de que la prosa mienta más-. La
+excepción es `output.effort_tier.evaluation_order`: sí lo recorre de
+verdad `_effort_tier`, así que se edita como reordenación pura de las
+cuatro etiquetas de `EffortTier`, sin alta ni baja. `version`/`status`
+también de solo lectura -ningún código los lee, y `version` es un hito con
+nombre que Pablo sube a mano, no un contador de ediciones-. El resto -
+`weights`/`anchors` (alta, baja y renombrado de dimensión libres),
+`gates` (igual, sin claves de criterio fijas), `baseline_madrid` (sus
+campos, no su nombre), `description`, `portfolio_policy` y `notes`- es
+editable sin puerta de vocabulario; `probability_bands` tiene las cuatro
+claves fijas (vocabulario de código) con el texto libre.
+
+Tres hallazgos nuevos de `ruamel.yaml`, ninguno visto en M0-M3: reasignar
+un escalar **numérico** sin comprobar antes si cambió pierde formato igual
+que un texto (`minimum_coverage: 0.50` → `0.5`); estampar la misma fecha en
+dos sitios (`updated_at` del documento y de `baseline_madrid`) con el
+mismo objeto de Python produce un ancla/alias YAML y de paso pierde una
+línea en blanco vecina -corregido con `.replace()`-; y `notes` es una
+lista de párrafos en bloque plegado, no de líneas cortas, así que necesitó
+su propio `set_folded_list_if_changed`. Detalle completo, con líneas
+exactas, en `docs/decisions/fase-2-perfil-editable.md`.
+
+Sin validación cruzada con otros ficheros -a diferencia de M3-: ninguna
+referencia de `scoring_model.yaml` a otro fichero es un identificador que
+el código resuelva.
+
+`/perfil` pasa a tener ocho pestañas -las siete de M3 más «Modelo de
+scoring»-.
+
+Verificado en esta máquina el 2026-09-08: `make check` limpio (465 tests
+API -30 nuevos- + 17 web), `make migrate-check` limpio, `make e2e` con los
+26 tests en verde -incluido el de editar el peso de una dimensión y las
+ocho pestañas-, captura de pantalla de la pestaña nueva revisada a mano, y
+`config/scoring_model.yaml` real vuelto a volcar idéntico byte a byte sin
+ninguna edición.
+
+**Sin verificar, y no se puede desde aquí:** lo mismo que M0-M3 -la deploy
+key de verdad y el directorio en la VM de producción-, sin cambios desde
+entonces.
+
+## Fase 2 cerrada, en código
+
+Las cinco rebanadas -shell mínimo, M0, M1, M2, M3 y M4- están hechas y
+verificadas en esta máquina. `/perfil` edita hoy los ocho ficheros YAML
+que Fase 2 se propuso cubrir, todos por el mismo mecanismo genérico de
+`git_ops.py` que M0 cerró el primer día y que ninguna rebanada posterior
+tuvo que tocar: `pull --rebase` → `ruamel.yaml` → validar → diff →
+confirmar → commit → push.
+
+**Confirmado, no solo asumido**: `ARCHITECTURE.md` (repositorio privado)
+dice de Fase 2 que «al guardar, CI recompila las variantes afectadas».
+`career-strategy/.github/workflows/build-cvs.yml` dispara en `push` a
+`dev` sobre exactamente las rutas que M2/M3 hicieron editables
+(`cv/content/professional_bullet_bank.yaml`, `cv/content/
+role_variant_content.yaml`, `config/cv_variants.yaml`) — como
+`commit_and_push` empuja directo a `dev` del repositorio privado, esto ya
+pasa solo, sin ningún código nuevo en `futuro-app`. `config/
+scoring_model.yaml` no está en esa lista de rutas, correctamente: no
+afecta a qué CV se genera, solo a qué variante se recomienda.
+
+**Deliberadamente fuera de las cinco rebanadas**, sin cambios desde que se
+troceó la fase el 2026-09-06: `profile/master_profile.md`,
 `profile/evidence_bank.md`, `profile/project_audits/*.md` y
-`cv/master/Pablo_Coma_CV_master.tex.jinja2`. Son prosa en Markdown o LaTeX,
-no YAML, y `ARCHITECTURE.md` acota Fase 2 a "los YAML del repositorio
-privado". Si algún día hace falta editarlos desde la app, es una decisión
-de UX distinta —edición de texto libre, o subir/reemplazar el documento
-entero— y no el editor de formularios con diff que construye esta fase.
+`cv/master/Pablo_Coma_CV_master.tex.jinja2`. Son prosa en Markdown o
+LaTeX, no YAML, y `ARCHITECTURE.md` acota Fase 2 a "los YAML del
+repositorio privado". Si algún día hace falta editarlos desde la app, es
+una decisión de UX distinta -edición de texto libre, o subir/reemplazar
+el documento entero- y no el editor de formularios con diff que
+construyó esta fase.
+
+**Pendiente, no bloqueante para seguir en código, sí para llevar Fase 2 a
+producción**: la deploy key de lectura-escritura y el directorio en la VM
+(`docs/deployment.md` §10), pendiente desde M0 de que Pablo lo ejecute.
+
+## Siguiente objetivo principal: Fase 3 — Pipeline y seguimiento
+
+Según `ARCHITECTURE.md`, Fase 3 es «estados, interacciones, recordatorios
+y el bot de Telegram avisando e ingiriendo ofertas». No troceada
+todavía: es el primer trabajo de la siguiente sesión, antes de escribir
+código, con el mismo hábito que ya demostró Fase 2 -investigar el estado
+real de lo que se vaya a tocar (`APP_SCREENS.md` §"Pipeline" y §"Hoy" del
+repositorio privado, el estado de la integración de Telegram si existe
+alguna) antes de dar por buena una cifra o una forma de memoria-.
 
 ### Cómo se trabaja esta fase
 
-Mismas reglas que la Fase 1, más una nueva: **una rebanada, una sesión de
-Claude Code.** La sesión que cerró la Fase 1 entera —M3, el despliegue, el
-arreglo de `dev`/`main`, y encima el hallazgo de diseño del shell— se hizo
-larguísima. A partir de aquí: rebanadas en serie, cada una de punta a
-punta, cada una en su propia sesión nueva; con su propia entrada (o
-ampliación) en `docs/decisions/fase-2-perfil-editable.md` al cerrarla, y
-`NEXT_SESSION.md` reescrito con el estado comprobado antes de cerrar la
-sesión, para que la siguiente pueda arrancar solo con leer este archivo.
-Empezar cada rebanada proponiendo el diseño y esperando el visto bueno
-antes de escribir código —el mismo patrón que ya funcionó para M3 y para
-el shell mínimo + M0—.
+Mismas reglas que Fase 2: una rebanada, una sesión de Claude Code: cada
+rebanada de punta a punta, en su propia sesión nueva, con su propia
+entrada en `docs/decisions/fase-3-*.md` al cerrarla, y `NEXT_SESSION.md`
+reescrito con el estado comprobado antes de cerrar la sesión. Empezar
+proponiendo el diseño y esperando el visto bueno antes de escribir
+código -el patrón que funcionó en las cinco rebanadas de Fase 2-.

@@ -8,6 +8,7 @@ import {
   commitPreferences,
   commitProjectCatalog,
   commitRoleVariants,
+  commitScoringModel,
   diffBulletBank,
   diffConstraints,
   diffCvVariants,
@@ -15,8 +16,11 @@ import {
   diffPreferences,
   diffProjectCatalog,
   diffRoleVariants,
+  diffScoringModel,
+  type BaselineEdit,
   type BaseVariantEdit,
   type BulletEdit,
+  type DimensionEdit,
   type DisqualifyingCondition,
   type EditableBulletBank,
   type EditableConstraints,
@@ -25,6 +29,11 @@ import {
   type EditablePreferences,
   type EditableProjectCatalog,
   type EditableRoleVariantContent,
+  type EditableScoringModel,
+  type EffortTier,
+  type GateEdit,
+  type PortfolioPolicyEdit,
+  type ProbabilityBandsEdit,
   type ProjectEdit,
   type SupersededDecision,
   type VariantContent,
@@ -47,6 +56,7 @@ export type BulletBankFormState = ObjectivesFormState;
 export type RoleVariantsFormState = ObjectivesFormState;
 export type CvVariantsFormState = ObjectivesFormState;
 export type ProjectCatalogFormState = ObjectivesFormState;
+export type ScoringModelFormState = ObjectivesFormState;
 
 /** Texto separado por comas -> lista sin vacíos, mismo criterio en todos
  * los campos de este tipo (`success_dimensions`, `evidence`,
@@ -438,6 +448,74 @@ export async function reviewProjectCatalog(
   }
 
   const result = await diffProjectCatalog(edit);
+  if (!result.ok) {
+    return { error: result.detail, diff: null, saved: false, commitSha: null };
+  }
+  return { error: null, diff: result.data.diff, saved: false, commitSha: null };
+}
+
+/**
+ * `baseline`, `dimensions`, `gates`, `probability_bands`,
+ * `effort_evaluation_order` y `portfolio_policy` viajan como JSON en campos
+ * ocultos -mismo criterio que `bullets_json`/`base_variants_json`-: filas y
+ * mapas de largo variable, ya mantenidos como estado de React en
+ * `ScoringModelForm`. `description`/`minimum_coverage`/`never_rule` son
+ * campos escalares sueltos, con su propio `name` en el control visible.
+ */
+function parseScoringModelEdit(formData: FormData): EditableScoringModel {
+  const baseline = JSON.parse(
+    String(formData.get("baseline_json") ?? "{}"),
+  ) as BaselineEdit;
+  const dimensions = JSON.parse(
+    String(formData.get("dimensions_json") ?? "[]"),
+  ) as DimensionEdit[];
+  const gates = JSON.parse(String(formData.get("gates_json") ?? "[]")) as GateEdit[];
+  const probability_bands = JSON.parse(
+    String(formData.get("probability_bands_json") ?? "{}"),
+  ) as ProbabilityBandsEdit;
+  const effort_evaluation_order = JSON.parse(
+    String(formData.get("effort_evaluation_order_json") ?? "[]"),
+  ) as EffortTier[];
+  const portfolio_policy = JSON.parse(
+    String(formData.get("portfolio_policy_json") ?? "{}"),
+  ) as PortfolioPolicyEdit;
+  const notes = JSON.parse(String(formData.get("notes_json") ?? "[]")) as string[];
+
+  return {
+    description: String(formData.get("description") ?? "").trim(),
+    baseline,
+    dimensions,
+    gates,
+    probability_bands,
+    minimum_coverage: Number(formData.get("minimum_coverage")),
+    never_rule: String(formData.get("never_rule") ?? "").trim(),
+    effort_evaluation_order,
+    portfolio_policy,
+    notes,
+  };
+}
+
+export async function reviewScoringModel(
+  _previous: ScoringModelFormState,
+  formData: FormData,
+): Promise<ScoringModelFormState> {
+  const intent = String(formData.get("intent") ?? "diff");
+  const edit = parseScoringModelEdit(formData);
+
+  if (intent === "commit") {
+    const result = await commitScoringModel(edit);
+    if (!result.ok) {
+      return { error: result.detail, diff: null, saved: false, commitSha: null };
+    }
+    return {
+      error: null,
+      diff: result.data.diff,
+      saved: true,
+      commitSha: result.data.commit_sha,
+    };
+  }
+
+  const result = await diffScoringModel(edit);
   if (!result.ok) {
     return { error: result.detail, diff: null, saved: false, commitSha: null };
   }

@@ -53,7 +53,7 @@ test("editar el objetivo, ver el diff sin escribir, y confirmar lo escribe y emp
  * propio fichero de punta a punta, mismo patrón que M0 arriba.
  */
 
-test("las siete pestañas de Perfil alternan de fichero sin cambiar de URL", async ({
+test("las ocho pestañas de Perfil alternan de fichero sin cambiar de URL", async ({
   page,
 }) => {
   await page.goto("/perfil");
@@ -90,6 +90,12 @@ test("las siete pestañas de Perfil alternan de fichero sin cambiar de URL", asy
   await page.getByRole("button", { name: "Catálogo de proyectos" }).click();
   await expect(
     page.getByRole("heading", { name: "Catálogo de proyectos" }),
+  ).toBeVisible();
+  await expect(page).toHaveURL(/\/perfil$/);
+
+  await page.getByRole("button", { name: "Modelo de scoring" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Modelo de scoring" }),
   ).toBeVisible();
   await expect(page).toHaveURL(/\/perfil$/);
 
@@ -345,4 +351,48 @@ test("editar el nombre de un proyecto del catálogo, ver el diff, y confirmar lo
   await expect(
     page.getByLabel("Nombre de invented_project_professional"),
   ).toHaveValue(nombre);
+});
+
+/**
+ * M4: `config/scoring_model.yaml`, la última rebanada de Fase 2. Contra el
+ * mismo fixture sintético, con tres dimensiones y dos filtros inventados.
+ * El bloque de solo lectura -`portfolio_assignment`, cada nivel de
+ * `output.effort_tier`- no tiene ningún control que probar aquí; solo el
+ * orden de evaluación, dentro de ese mismo bloque, es editable.
+ */
+
+test("editar el peso de una dimensión del modelo de scoring, ver el diff, y confirmar lo escribe y empuja", async ({
+  page,
+}) => {
+  // Un peso distinto en cada ejecución -no una marca de texto, como el
+  // resto de la suite-: `weight` es un entero, y el punto de esta prueba
+  // es comprobar el round-trip numérico de verdad, no solo que aparece
+  // texto nuevo en el diff.
+  const peso = String(30 + (Date.now() % 50));
+
+  await page.goto("/perfil");
+  await page.getByRole("button", { name: "Modelo de scoring" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Modelo de scoring" }),
+  ).toBeVisible();
+
+  // La documentación de solo lectura de cada nivel de esfuerzo se enseña,
+  // aunque no tenga formulario.
+  await expect(page.getByText("Cómo decide el código hoy")).toBeVisible();
+
+  await page.getByLabel("Peso de la dimensión 1").fill(peso);
+  await page.getByRole("button", { name: "Ver cambios" }).click();
+
+  const diff = page.locator("pre");
+  await expect(diff).toBeVisible();
+  await expect(diff).toContainText(peso);
+
+  await page.getByRole("button", { name: "Confirmar y guardar" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Escrito y empujado" }),
+  ).toBeVisible();
+
+  await page.reload();
+  await page.getByRole("button", { name: "Modelo de scoring" }).click();
+  await expect(page.getByLabel("Peso de la dimensión 1")).toHaveValue(peso);
 });

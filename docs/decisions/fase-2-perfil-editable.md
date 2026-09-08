@@ -798,3 +798,217 @@ completa corrida contra los cinco ficheros reales a la vez.
 **Sin verificar, y no se puede desde aquí:** lo mismo que M0/M1/M2 -la
 deploy key de verdad y el directorio en la VM de producción-, sin
 cambios desde entonces.
+
+## 2026-09-08 — M4, `config/scoring_model.yaml`, cierra Fase 2 entera
+
+### La investigación confirmó la forma y localizó con precisión las tres interpretaciones de `assessment/scoring.py`
+
+`config/scoring_model.yaml` seguía en **v2** (`version: 2`,
+`updated_at: 2026-09-05`, commit `4bd70d4`), **309 líneas**, sin tocar
+desde el cierre del cuarto hueco documentado en Fase 1 M2. 15 claves de
+primer nivel confirmadas: `version`, `status`, `updated_at`,
+`description`, `baseline_madrid`, `weights`, `scale`, `anchors`,
+`probability_bands`, `portfolio_assignment`, `portfolio_policy`,
+`gates`, `missing_data`, `output`, `notes`.
+
+Las tres interpretaciones que Fase 1 M2 había dejado como código sin
+declarar en el YAML siguen, las tres, **en prosa y no en forma legible
+por máquina**, confirmado leyendo `scoring.py`/`loader.py` enteros línea
+a línea:
+
+- **`very_low` -> `aspirational`**: declarado en
+  `portfolio_assignment.aspirational` (línea 143) y explicado en
+  `.note` (151-154); el código lo tiene aparte, hardcodeado en
+  `BUCKET_OF_BAND` (`scoring.py:64-73`).
+- **Orden de evaluación de cubos** (discard -> experimental -> banda):
+  declarado en `portfolio_assignment.note` (156-164); el código lo
+  implementa como el orden literal de los `if` de `_portfolio_bucket`
+  (194-208), con un docstring que cita esa nota como fuente desde el
+  2026-09-05.
+- **Estrechamiento de `cheap`**: declarado en
+  `output.effort_tier.note` (264-278); el código ya lo implementa
+  (244-256).
+
+**Hallazgo que no estaba previsto**: la nota de `cheap` termina
+literalmente con «Pendiente de implementar en futuro-app», aunque
+`scoring.py` ya lo implementa desde el mismo 2026-09-05 en que se
+escribió la nota. Es una prueba en vivo, no hipotética, de que la prosa
+puede mentir sobre su propio estado sin que nada lo note -exactamente
+el riesgo que motivó la pregunta de diseño de abajo-.
+
+Ninguna de las tres pasó a forma legible por máquina en v2: las tres
+siguen siendo prosa que hay que leer y sincronizar a mano con
+`scoring.py`, la misma disciplina que ese módulo ya aplica y defiende
+por su cuenta (mismo patrón que `llm/cost.py` con la tabla de tarifas).
+
+### La pregunta de diseño: ¿exponer a edición la prosa que documenta lógica que decide el código a mano?
+
+Mapear qué texto del YAML llega al LLM (`assessment/prompt.py`) y qué
+no reveló una frontera clara: pesos+anclas, filtros, `probability_bands`,
+`baseline_*` y `missing_data.never` se interpolan en el prompt -editarlos
+cambia de verdad lo que juzga el modelo, es la disciplina de siempre-.
+Pero **`portfolio_assignment` (reglas + nota), `output.effort_tier.
+{tier}.when/do` + `.note`, `missing_data.rule/method/coverage/
+below_minimum` y `output.required_fields` no llegan a ningún prompt ni
+los parsea el cargador más allá de las claves**: son documentación
+humana de umbrales que decide `VALUE_FLOOR`/`VALUE_FULL_EFFORT`/
+`BUCKET_OF_BAND` en Python. Editar ese bloque no cambiaría ni una coma
+de cómo se puntúa una oferta -el hallazgo de la nota de `cheap` ya
+demuestra que ese desajuste puede pasar sin que nadie lo note-.
+
+**Decidido con Pablo el 2026-09-08, la opción recomendada: solo lectura
+para todo ese bloque**, mismo criterio que `claim_rules`/
+`fixed_sections` en M3. Cambiar de verdad un umbral sigue siendo una
+sesión de código que toca YAML y `scoring.py` a la vez, no un envío de
+formulario. La excepción dentro de ese bloque es
+`output.effort_tier.evaluation_order`: a diferencia de sus vecinos,
+`_effort_tier` sí lo recorre de verdad, así que reordenarlo cambia el
+resultado real; se edita como reordenación pura del vocabulario cerrado
+de `EffortTier`, sin alta ni baja.
+
+### Editable vs. solo lectura, decidido campo a campo
+
+- **Solo lectura, sin excepción**: `version` -el histórico de git lo
+  trata como hito con nombre, tres bumps en un mes, cada uno atado a un
+  cierre real; auto-incrementarlo en cada guardado lo degradaría a
+  ruido-; `status` -ningún código lo lee, y no hay nada real que
+  gestionar hoy con una anotación que no se ve en ningún sitio-; el
+  nombre del bloque `baseline_*` -renombrar la ciudad de referencia es
+  un evento raro con implicaciones en las anclas económicas, no una
+  edición de formulario-; `scale` -atada al CHECK de
+  `offer_assessment_dimensions`, exige migración-; y el bloque de
+  documentación-de-lógica-hardcodeada de la pregunta de arriba.
+- **Editable sin puerta de vocabulario** -confirmado por grep: ningún
+  código ramifica sobre el nombre de una dimensión o de un filtro, y
+  Fase 1 M2 ya renombró una dimensión sin tocar ninguna línea de
+  código-: `weights`/`anchors` (alta, baja y renombrado de dimensión) y
+  `gates` (alta, baja y renombrado de filtro, sin claves fijas de
+  criterio -`savings_floor` ya declara `pass_spain`/`pass_abroad` en vez
+  de un `pass` a secas en el repositorio real-). Los campos dentro de
+  `baseline_*` (no su nombre), `description`, `portfolio_policy` -nunca
+  leído por ningún código, confirmado por grep, a diferencia de
+  `portfolio_assignment`, con el que no hay que confundirlo- y `notes`
+  tampoco tienen vocabulario que proteger.
+- **Editable con puerta de vocabulario en las claves**:
+  `probability_bands` -las cuatro claves fijas contra `ProbabilityBand`,
+  que el cargador ya exige que el YAML declare exactamente; el texto de
+  cada banda, que llega al modelo por el prompt, es libre- y
+  `output.effort_tier.evaluation_order` -permutación exacta de las
+  cuatro etiquetas de `EffortTier`-.
+
+Sin validación cruzada con otros ficheros, a diferencia de M3: ninguna
+referencia de `scoring_model.yaml` a otro fichero es un identificador
+que el código resuelva -`role_fit.note` menciona «familias de
+objectives.yaml» y «banco de bullets» en prosa, no como `bullet_id`/
+`project_id`-.
+
+### El mecanismo: filas «etiqueta -> texto», reutilizadas para anclas y para criterios de filtro
+
+`weights`/`anchors` viven como dos mapas paralelos en el YAML
+(`{nombre: peso}` y `{nombre: {nivel_o_nota: texto}}`); se editan como
+una sola lista de `DimensionEdit` (nombre, peso, filas de ancla) y
+`scoring_model.py._apply_dimensions` reconstruye los dos mapas a la vez.
+Cada fila de ancla es un `LabeledTextRow` (`label`/`text`) -mismo
+patrón que `SkillRowEdit` en `role_variant_content.yaml`-, donde `label`
+es un nivel numérico (`"0"`, `"1"`, `"3"`, `"5"`) o una nota libre
+(`assumption`/`includes`/`measured_against`/...), distinguidos por si
+la etiqueta analiza como entero -mismo criterio que `_dimensions` en
+`data_repo/loader.py`-. `gates` reutiliza el mismo `LabeledTextRow` para
+sus criterios (`pass`/`fail`/`context`/...), con al menos uno que no sea
+`context`/`note` -si no, el filtro no dice cuándo se pasa ni cuándo se
+falla-.
+
+### Tres hallazgos nuevos de `ruamel.yaml`, ninguno visto en M0-M3
+
+- **Reasignar un escalar numérico sin comprobar antes si cambió pierde
+  formato, igual que un texto.** Comprobado el 2026-09-08:
+  `minimum_coverage: 0.50` se reescribía como `0.5` con la sola
+  secuencia cargar->volcar de una reasignación incondicional, porque un
+  `float` de Python no lleva los ceros decimales que sí lleva el
+  `ScalarFloat` de `ruamel`. Ningún módulo anterior tenía un campo
+  numérico con formato significativo -pesos y años son enteros sin
+  decimales-, así que el hallazgo no podía haber aparecido antes.
+  Corregido con `yaml_style.set_scalar_if_changed`, generalizando la
+  disciplina de "comparar antes de reasignar" de M1 a cualquier tipo
+  escalar, no solo texto.
+- **Estampar la misma fecha en dos sitios con el mismo objeto de Python
+  produce un ancla y un alias YAML (`&id001`/`*id001`) en vez de repetir
+  el escalar, y de paso pierde la línea en blanco vecina.** Este fichero
+  es el primero en necesitar dos `updated_at` -el del documento y el de
+  `baseline_*`-; asignar el mismo objeto `date` a los dos hizo que
+  `ruamel` los representara como alias, y el efecto colateral fue perder
+  la línea en blanco que separaba el bloque de `baseline_*` del
+  siguiente. Corregido pasando `updated_at.replace()` -un objeto `date`
+  distinto, mismo valor- al segundo sitio.
+- **`notes` es una lista de párrafos en bloque plegado, no de líneas
+  cortas como `hard_constraints`.** `set_string_list_if_changed`
+  reescribiría una entrada modificada como una cadena entrecomillada de
+  una sola línea; `set_folded_list_if_changed` -nueva en
+  `yaml_style.py`- pliega cada entrada nueva, mismo criterio que
+  `set_folded_if_changed` aplica a un campo suelto.
+
+`baseline_madrid.updated_at` -distinto del `updated_at` del documento,
+que se estampa siempre- solo se mueve si de verdad cambió algún campo
+de la línea base: comparar antes/después de aplicar la edición evita
+que editar, por ejemplo, solo un filtro mueva también la fecha de
+verificación de la línea base económica.
+
+### Verificado contra el repositorio privado real, no solo el fixture
+
+`scoring_model.current()` carga, valida y vuelve a volcar el
+`config/scoring_model.yaml` real **idéntico byte a byte** cuando no se
+edita nada, y cambia exactamente la línea de `updated_at` del documento
+-sin tocar la de `baseline_madrid`- cuando solo cambia la fecha de
+escritura. Las seis dimensiones, los cuatro filtros y el orden de
+esfuerzo reales se leen y validan sin ningún hallazgo nuevo de
+`ruamel.yaml` más allá de los tres de arriba.
+
+### Fixtures y verificación
+
+Fixture nuevo, con datos inventados:
+`tests/fixtures/data_repo_write/config/scoring_model.yaml` -tres
+dimensiones y dos filtros, no seis y cuatro, con nombres inventados en
+los dos casos; una dimensión declara solo tres anclas (0, 3, 5) a
+propósito, para probar que el modelo exige "al menos un nivel numérico"
+y no "los cuatro niveles habituales"-. El remoto de git local
+(`.dev-data/repo-write-remote.git`) se resembró tras ampliar el fixture
+-mismo precio que M1/M2/M3 ya documentaron, con una trampa nueva: en
+macOS, borrar el bind mount mientras `api`/`worker` siguen arriba deja
+un directorio fantasma que ni `rm -rf` ni `rmdir` consiguen quitar
+-"Permission denied" sobre un directorio que `ls` ya enseña vacío-;
+hace falta `docker compose down` antes de tocar `.dev-data/` a mano-.
+
+`/perfil` pasa a tener ocho pestañas -Objetivos, Preferencias,
+Restricciones, Bullets, Variantes de rol, Variantes de CV, Catálogo de
+proyectos, Modelo de scoring-.
+
+Verificado en esta máquina el 2026-09-08: `make check` limpio (465
+tests API -30 nuevos- + 17 web), `make migrate-check` limpio, `make e2e`
+con los 26 tests en verde -incluidos el nuevo de editar el peso de una
+dimensión y la actualización del test de las ocho pestañas-, captura de
+pantalla de la pestaña nueva revisada a mano, y los dos ficheros reales
+-`config/scoring_model.yaml` y `career-strategy` sin ningún otro
+fichero de por medio, porque esta rebanada no cruza referencias- vueltos
+a volcar idénticos byte a byte.
+
+**Sin verificar, y no se puede desde aquí:** lo mismo que M0-M3 -la
+deploy key de verdad y el directorio en la VM de producción-, sin
+cambios desde entonces.
+
+## Fase 2 cerrada
+
+Las cinco rebanadas -shell mínimo, M0, M1, M2, M3 y M4- están hechas,
+verificadas en esta máquina, y ninguna ha tocado una línea del
+mecanismo genérico de `git_ops.py` desde que M0 lo cerró: `pull
+--rebase` -> `ruamel.yaml` -> validar -> diff -> confirmar -> commit ->
+push, exactamente como predijo `ARCHITECTURE.md` §5. `/perfil` edita
+hoy los ocho ficheros YAML que Fase 2 se propuso cubrir. Lo que queda
+deliberadamente fuera -`profile/master_profile.md`,
+`profile/evidence_bank.md`, `profile/project_audits/*.md`,
+`cv/master/Pablo_Coma_CV_master.tex.jinja2`- sigue fuera por ser prosa o
+LaTeX, no YAML, tal como `ARCHITECTURE.md` acota Fase 2 desde el
+principio.
+
+Pendiente de aprovisionar a mano en producción antes de llevar Fase 2
+entera a producción: la deploy key de lectura-escritura
+(`docs/deployment.md` §10), sin cambios desde M0.

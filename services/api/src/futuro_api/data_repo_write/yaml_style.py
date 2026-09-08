@@ -51,6 +51,28 @@ plegados de los otros tres ficheros -comprobado explícitamente: `ruamel`
 no fuerza un re-envolvido al ancho nuevo, conserva los saltos de línea del
 escalar tal como se cargó mientras quepan bajo ese ancho-, así que un
 ancho generoso es estrictamente más seguro que el de 80 por omisión.
+
+**Hallazgo de Fase 2 M4, con `scoring_model.yaml` real**: reasignar un
+escalar **numérico** sin comprobar antes si cambió pierde formato igual
+que un texto -no solo los folded scalars tienen esta trampa-. Comprobado
+el 2026-09-08: `minimum_coverage: 0.50` se reescribía como `0.5` con la
+sola secuencia cargar->volcar de una reasignación incondicional, aunque
+el valor puntuado fuera exactamente el mismo, porque un `float` de Python
+no lleva los ceros decimales que sí lleva el `ScalarFloat` de `ruamel`.
+Ningún módulo anterior (M0-M3) tenía un campo numérico con formato
+significativo -pesos y años son enteros sin decimales, sin nada que
+perder-, así que el hallazgo no podía haber aparecido antes.
+`set_scalar_if_changed` cierra esto para cualquier escalar, no solo
+texto: comparar por valor (`!=`) antes de reasignar deja intacto el nodo
+de origen siempre que el valor no cambió de verdad, sea cual sea su tipo.
+
+**`notes` de `scoring_model.yaml`, a diferencia de `hard_constraints`/
+`pending_decisions`, es una lista de párrafos en bloque plegado, no de
+líneas cortas.** `set_string_list_if_changed` reescribiría cada entrada
+modificada como una cadena entrecomillada de una sola línea -válida, pero
+un cambio de estilo que nadie pidió-; `set_folded_list_if_changed` pliega
+cada entrada nueva, mismo criterio que `set_folded_if_changed` aplica a un
+campo suelto.
 """
 
 from __future__ import annotations
@@ -79,11 +101,15 @@ def data_repo_yaml() -> YAML:
 
 
 def set_folded_if_changed(
-    mapping: MutableMapping[str, object], key: str, text: str
+    mapping: MutableMapping[Any, object], key: object, text: str
 ) -> None:
     """Reescribe `mapping[key]` como bloque plegado, solo si `text` es
     distinto de lo que ya había -ni siquiera se construye el
-    `FoldedScalarString` nuevo si no hace falta-."""
+    `FoldedScalarString` nuevo si no hace falta-.
+
+    `key` no está tipado como `str`: las anclas de una dimensión de
+    `scoring_model.yaml` casan por un nivel numérico (`0`, `1`, ...) tanto
+    como por una nota de nombre libre (`assumption`, ...)."""
     if str(mapping[key]) == text:
         return
     mapping[key] = FoldedScalarString(text)
@@ -99,3 +125,32 @@ def set_string_list_if_changed(
     if list(existing) == new_values:
         return
     existing[:] = new_values
+
+
+def set_folded_list_if_changed(
+    container: MutableMapping[str, Any], key: str, values: Iterable[str]
+) -> None:
+    """Como `set_string_list_if_changed`, pero plegando cada entrada nueva.
+
+    Para una lista de párrafos -`notes` de `scoring_model.yaml`- y no de
+    líneas cortas: sin plegar, una entrada modificada quedaría como una
+    cadena entrecomillada de una sola línea en vez de conservar el estilo
+    de bloque plegado (`>-`) del fichero real."""
+    existing = container[key]
+    new_values = list(values)
+    if list(existing) == new_values:
+        return
+    existing[:] = [FoldedScalarString(text) for text in new_values]
+
+
+def set_scalar_if_changed(
+    mapping: MutableMapping[str, Any], key: str, value: object
+) -> None:
+    """Reasigna `mapping[key]` solo si `value` es distinto de lo que ya hay.
+
+    Hace falta también para escalares **numéricos**, no solo para texto:
+    ver el hallazgo de Fase 2 M4 más arriba. Comparar por valor antes de
+    reasignar es lo único que deja intacto el nodo de origen -con su
+    formato- cuando el valor no cambió de verdad, sin importar el tipo."""
+    if mapping[key] != value:
+        mapping[key] = value

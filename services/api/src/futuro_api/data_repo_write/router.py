@@ -34,6 +34,7 @@ from futuro_api.data_repo_write import (
     preferences,
     project_catalog,
     role_variant_content,
+    scoring_model,
 )
 from futuro_api.data_repo_write.git_ops import GitRemote
 from futuro_api.data_repo_write.models import (
@@ -47,10 +48,12 @@ from futuro_api.data_repo_write.models import (
     EditablePreferences,
     EditableProjectCatalog,
     EditableRoleVariantContent,
+    EditableScoringModel,
     Objectives,
     Preferences,
     ProjectCatalog,
     RoleVariantContent,
+    ScoringModel,
 )
 
 router = APIRouter(prefix="/api/profile", tags=["profile"])
@@ -605,3 +608,76 @@ async def commit_project_catalog(
         ) from error
 
     return ProjectCatalogCommitResponse(commit_sha=sha, diff=result.unified_diff)
+
+
+class ScoringModelDiffResponse(BaseModel):
+    diff: str
+    validated: ScoringModel
+
+
+class ScoringModelCommitResponse(BaseModel):
+    commit_sha: str
+    diff: str
+
+
+@router.get("/scoring-model", summary="El scoring_model.yaml vigente")
+async def get_scoring_model(request: Request) -> ScoringModel:
+    root, remote = _configured(request)
+    _sync(root, remote)
+    return scoring_model.current(root)
+
+
+@router.post(
+    "/scoring-model/diff",
+    summary="Calcula el diff de una edición, sin escribir nada",
+)
+async def diff_scoring_model(
+    request: Request, edit: Annotated[EditableScoringModel, Body()]
+) -> ScoringModelDiffResponse:
+    root, remote = _configured(request)
+    _sync(root, remote)
+    try:
+        result = scoring_model.prepare(root, edit, today=date.today())
+    except scoring_model.ScoringModelValidationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+        ) from error
+    return ScoringModelDiffResponse(
+        diff=result.unified_diff, validated=result.validated
+    )
+
+
+@router.post(
+    "/scoring-model/commit",
+    status_code=status.HTTP_201_CREATED,
+    summary="Escribe, commitea y empuja una edición",
+)
+async def commit_scoring_model(
+    request: Request, edit: Annotated[EditableScoringModel, Body()]
+) -> ScoringModelCommitResponse:
+    root, remote = _configured(request)
+    _sync(root, remote)
+    try:
+        result = scoring_model.write(root, edit, today=date.today())
+    except scoring_model.ScoringModelValidationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+        ) from error
+
+    try:
+        sha = git_ops.commit_and_push(
+            root,
+            remote,
+            [scoring_model.RELATIVE_PATH],
+            message="profile: actualizar config/scoring_model.yaml",
+            author_name=AUTHOR_NAME,
+            author_email=AUTHOR_EMAIL,
+        )
+    except git_ops.GitConflictError as error:
+        raise _conflict(error) from error
+    except git_ops.GitOpsError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)
+        ) from error
+
+    return ScoringModelCommitResponse(commit_sha=sha, diff=result.unified_diff)

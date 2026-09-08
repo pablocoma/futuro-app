@@ -882,3 +882,116 @@ export function commitProjectCatalog(
 ): Promise<PostResult<ProjectCatalogCommit>> {
   return apiPost<ProjectCatalogCommit>("/api/profile/project-catalog/commit", edit);
 }
+
+/**
+ * `config/scoring_model.yaml`, Fase 2 M4 -- la última rebanada de Fase 2.
+ *
+ * Alta, baja y renombrado libres en `dimensions` y `gates`: ningún código
+ * ramifica sobre el nombre de una dimensión o de un filtro. `anchors`/`rows`
+ * son filas «etiqueta -> texto» de longitud variable -mismo criterio que
+ * `skills` en `role_variant_content.yaml`-.
+ *
+ * `probability_bands` tiene las cuatro claves fijas (vocabulario de código);
+ * `effort_evaluation_order` es una permutación de las cuatro etiquetas de
+ * `EffortTier`, la única parte de `output.effort_tier` que de verdad recorre
+ * `assessment/scoring.py` -el resto (`required_fields`, y `when`/`do`/`note`
+ * de cada nivel) es de solo lectura, documentación de umbrales que decide a
+ * mano el código, igual que `scale`, `portfolio_assignment` y el resto de
+ * `missing_data`-.
+ */
+export type EffortTier = "full" | "standard" | "cheap" | "skip";
+
+export type LabeledTextRow = { label: string; text: string };
+
+export type DimensionEdit = {
+  name: string;
+  weight: number;
+  anchors: LabeledTextRow[];
+};
+
+export type GateEdit = {
+  name: string;
+  rows: LabeledTextRow[];
+};
+
+export type BaselineEdit = {
+  gross_annual_eur: number;
+  payments_per_year: number;
+  net_monthly_eur: number;
+  net_annual_eur: number;
+  living_costs_monthly_eur: [number, number];
+  annual_savings_eur: [number, number];
+  reference_savings_eur: number;
+  savings_rate: number;
+  cause: string;
+  implication: string;
+};
+
+export type ProbabilityBandsEdit = {
+  high: string;
+  medium: string;
+  low: string;
+  very_low: string;
+};
+
+export type PortfolioPolicyEdit = {
+  realistic: number;
+  realistic_stretch: number;
+  aspirational: number;
+  experimental: number;
+  status: string;
+  note: string;
+};
+
+export type EditableScoringModel = {
+  description: string;
+  baseline: BaselineEdit;
+  dimensions: DimensionEdit[];
+  gates: GateEdit[];
+  probability_bands: ProbabilityBandsEdit;
+  minimum_coverage: number;
+  never_rule: string;
+  effort_evaluation_order: EffortTier[];
+  portfolio_policy: PortfolioPolicyEdit;
+  notes: string[];
+};
+
+export type ScoringModel = EditableScoringModel & {
+  version: number;
+  status: string;
+  updated_at: string;
+  baseline_name: string;
+  /** Bloques fijos, sin editar. */
+  scale: Record<string, unknown>;
+  portfolio_assignment: Record<string, unknown>;
+  missing_data: Record<string, unknown>;
+  output: Record<string, unknown>;
+};
+
+export type ScoringModelDiff = { diff: string; validated: ScoringModel };
+export type ScoringModelCommit = { commit_sha: string; diff: string };
+
+export async function getScoringModel(): Promise<ScoringModel | null> {
+  try {
+    const response = await fetch(`${API_INTERNAL_URL}/api/profile/scoring-model`, {
+      headers: await cookieHeaders(),
+      cache: "no-store",
+    });
+    if (!response.ok) return null;
+    return (await response.json()) as ScoringModel;
+  } catch {
+    return null;
+  }
+}
+
+export function diffScoringModel(
+  edit: EditableScoringModel,
+): Promise<PostResult<ScoringModelDiff>> {
+  return apiPost<ScoringModelDiff>("/api/profile/scoring-model/diff", edit);
+}
+
+export function commitScoringModel(
+  edit: EditableScoringModel,
+): Promise<PostResult<ScoringModelCommit>> {
+  return apiPost<ScoringModelCommit>("/api/profile/scoring-model/commit", edit);
+}
