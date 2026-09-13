@@ -157,6 +157,19 @@ jobs:
           # falla, que es justo lo que el E2E viene a comprobar.
           docker compose exec -T api alembic upgrade head
 
+      - name: DEBUG temporal 2, quitar antes de mergear
+        run: |
+          echo "--- permisos en el host ---"
+          stat -c '%U:%G %a %n' .dev-data .dev-data/repo-write .dev-data/repo-write-remote.git
+          id
+          echo "--- permisos dentro de api ---"
+          docker compose exec -T api id
+          docker compose exec -T api stat -c '%U:%G %a %n' /data/repo-write /data/repo-write-remote.git
+          echo "--- intento manual de clonar dentro de api ---"
+          docker compose exec -T api git clone /data/repo-write-remote.git /tmp/probe 2>&1 || true
+          echo "--- respuesta real de /api/profile/objectives ---"
+          curl -s -i http://localhost:8000/api/profile/objectives || true
+
       - uses: actions/setup-node@v4
         with:
           node-version: 24
