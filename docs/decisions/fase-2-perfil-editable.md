@@ -1146,3 +1146,57 @@ toda esta entrada. Mientras no se corrija, `perfil.spec.ts` no puede pasar
 de verdad en GitHub Actions -sí en esta máquina, con `make up`-, y el
 check `e2e` seguirá en rojo para cualquier PR de `dev` a `main`. Anotado
 como siguiente paso en `NEXT_SESSION.md`.
+
+### Cierre del hallazgo anterior, misma sesión que empieza la rebanada 2 de Fase 3
+
+Tres bugs distintos, cada uno destapando al siguiente, cada uno
+confirmado contra una ejecución real de GitHub Actions -no solo en esta
+máquina-, no una suposición corregida en el sitio:
+
+1. **Faltaba el seed.** Confirmado arriba: `ci.yml` nunca llamaba a `make
+   seed-data-repo-write`. Añadirlo destapó el segundo bug.
+2. **Permisos.** `api` corre como el usuario sin privilegios `uid 10001`
+   del `Dockerfile`, no como quien ejecuta `make`. Un bind mount de Linux
+   de verdad exige que ese uid pueda escribir -Docker Desktop en Mac no
+   lo comprueba, por eso nunca se vio en esta máquina-; sin permiso, el
+   primer `git clone` del contenedor fallaba con «Permission denied».
+   Abrir `.dev-data/repo-write` con `chmod 777` lo resolvió, y destapó el
+   tercero.
+3. **"Dubious ownership".** Con el permiso ya abierto, el clon seguía
+   fallando: git moderno se niega a leer un repositorio cuyo dueño no
+   coincide con el uid actual. El remoto bare lo creaba el usuario del
+   host (el runner de CI, o quien ejecute `make` en local), no `uid
+   10001`. La corrección obvia -`-c safe.directory=*`, o su equivalente
+   por entorno `GIT_CONFIG_COUNT`/`_KEY_0`/`_VALUE_0`- **no basta**:
+   `git clone` lee el remoto local con un subproceso propio que no hereda
+   ninguno de los dos, confirmado con una réplica manual del comando
+   exacto contra la imagen real del `Dockerfile` (git 2.47.3), no solo en
+   teoría. La solución de fondo es que el dueño coincida desde el
+   principio: `make seed-data-repo-write` siembra ahora el bare **dentro
+   de un contenedor efímero con `--user 10001`** (`alpine/git`, versión
+   fijada), en vez de con el `git` del host. Así la comprobación nunca se
+   dispara, en vez de intentar sortearla.
+
+El punto 3 no toca a producción: el remoto real es una URL de GitHub por
+SSH, ajena por completo a esta comprobación de git sobre repositorios
+locales. Sí queda un hallazgo lateral en `docs/deployment.md` §10, no
+corregido en esta sesión porque la deploy key de escritura todavía no
+se ha aprovisionado y no bloquea nada hoy: sus pasos de "Provisionar, en
+orden" no crean `/opt/futuro/data/repo-write` con permisos que `uid
+10001` pueda escribir -mismo bug que el punto 2, sin descubrir todavía en
+producción-, y el `chmod 600` de la deploy key privada, con propietario
+"el usuario de deploy", dejaría al contenedor sin poder leerla en
+absoluto. Anotado en `NEXT_SESSION.md` para revisar antes de provisionar.
+
+Además, `git_ops.py::_run()` cambió de `-c safe.directory=*` a las
+variables de entorno equivalentes: no arregla el punto 3 -ninguna de las
+dos lo hace, según lo de arriba-, pero es la forma correcta de que el
+flag sí llegue a `pull`/`push`/`commit`, que operan con `-C` sobre un
+directorio que no tiene el problema del subproceso de `clone`.
+
+Verificado contra GitHub Actions real, no solo en local: los tres bugs
+reproducidos y corregidos uno a uno contra ejecuciones reales de `ci.yml`
+en `dev`, con `docker compose exec` dentro del runner para confirmar cada
+causa antes de corregirla, y una réplica local final -mismo uid, misma
+versión de git que la imagen real- antes del último push. Run verde:
+todos los jobs, incluido `e2e`.

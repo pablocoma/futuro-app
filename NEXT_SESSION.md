@@ -32,8 +32,7 @@ sospecha de que están desactualizados.
   varias pestañas a la vez-; verificado en esta máquina y contra dos
   ejecuciones reales de la CI de GitHub Actions, cero errores de git en
   ambas. Ver la sección fechada de ese día en el mismo fichero de
-  decisiones. **Al investigarlo salió un problema distinto y sin
-  resolver, ver cabos sueltos abajo.**
+  decisiones.
 - **Fase 3** (pipeline y seguimiento) — en curso desde 2026-09-08. Troceo
   y siguiente objetivo abajo.
   `docs/decisions/fase-3-pipeline-y-seguimiento.md` —lee solo su sección
@@ -51,22 +50,16 @@ tag anterior si falla. `main` está protegida (PR obligatorio, checks de
 
 **Cabos sueltos:**
 
-- **Bloqueante para un PR limpio de `dev` a `main` -no para seguir
-  trabajando en `dev`-: el check `e2e` de `ci.yml` no puede pasar
-  `perfil.spec.ts` en GitHub Actions.** Encontrado el 2026-09-13
-  investigando la corrección de arriba: `.github/workflows/ci.yml`
-  levanta el stack a mano (`cp .env.example .env` → `docker compose up`
-  → `alembic upgrade head`) pero **nunca llama a
-  `make seed-data-repo-write`**, que es el único sitio que siembra el
-  remoto bare que `DATA_REPO_WRITE_REMOTE` espera. Sin él,
-  `/api/profile/*` responde `503` en cualquier ejecución de la CI -no en
-  esta máquina, donde `make up` sí encadena ese paso-, así que `/perfil`
-  nunca enseña el formulario real y todos sus tests fallan. Detalle
-  completo en `docs/decisions/fase-2-perfil-editable.md`, sección del
-  2026-09-13. Arreglo probable: añadir el equivalente de
-  `make seed-data-repo-write` (o llamar a `make up` directamente) al paso
-  "Levantar el stack" de `ci.yml` -sin investigarlo más a fondo todavía,
-  es la primera hipótesis razonable, no una solución confirmada-.
+- **Revisar `docs/deployment.md` §10 antes de aprovisionar la deploy key
+  de escritura.** Hallazgo lateral del 2026-09-13 al cerrar el bloqueante
+  de `e2e` (ver `docs/decisions/fase-2-perfil-editable.md`, sección de ese
+  día): sus pasos de "Provisionar, en orden" no crean
+  `/opt/futuro/data/repo-write` con permisos que el `uid 10001` de `api`
+  pueda escribir, y el `chmod 600` de la deploy key privada -propietario
+  "el usuario de deploy"- dejaría al contenedor sin poder leerla en
+  absoluto. No bloquea nada hoy porque esa deploy key todavía no se ha
+  aprovisionado; sí bloqueará el día que se intente sin corregir esto
+  primero.
 - Sin `pg_dump` de producción todavía (`ARCHITECTURE.md` §12 lo pide
   diario, cifrado, 30 días de retención).
 - Aviso por Telegram del resultado del deploy: pendiente hasta la
