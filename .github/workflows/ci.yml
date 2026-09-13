@@ -157,19 +157,6 @@ jobs:
           # falla, que es justo lo que el E2E viene a comprobar.
           docker compose exec -T api alembic upgrade head
 
-      - name: DEBUG temporal, quitar antes de mergear
-        run: |
-          echo "--- env DATA_REPO_WRITE_* dentro de api ---"
-          docker compose exec -T api env | grep DATA_REPO_WRITE || true
-          echo "--- /data/repo-write-remote.git dentro de api ---"
-          docker compose exec -T api ls -la /data/repo-write-remote.git || true
-          echo "--- /data/repo-write dentro de api ---"
-          docker compose exec -T api ls -la /data/repo-write || true
-          echo "--- host .dev-data ---"
-          ls -la .dev-data .dev-data/repo-write-remote.git .dev-data/repo-write || true
-          echo "--- respuesta real de /api/profile/objectives ---"
-          curl -s -i http://localhost:8000/api/profile/objectives || true
-
       - uses: actions/setup-node@v4
         with:
           node-version: 24

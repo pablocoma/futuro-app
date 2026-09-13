@@ -16,8 +16,19 @@ help: ## Lista los objetivos disponibles
 # sola vez -si ya existe, no hace nada, igual que "clona una vez" hace la
 # propia app con su clon de trabajo-. Apuntar `DATA_REPO_WRITE_REMOTE` al
 # `Futuro` real es cosa de `.env`, igual que ya vale para `DATA_REPO_HOST_PATH`.
+#
+# `chmod 777`/`chmod -R a+rwX` a propósito: `api` corre como el usuario sin
+# privilegios `uid 10001` del `Dockerfile` (no el que ejecuta este target),
+# y un bind mount de Linux sí exige que ese uid pueda escribir de verdad
+# -a diferencia de Docker Desktop en Mac, que no lo comprueba y por eso
+# esto nunca se había notado en local-. Sin abrir el permiso, el primer
+# `git clone` del contenedor sobre `.dev-data/repo-write` falla con
+# «Permission denied» -así se descubrió, en la CI real de GitHub Actions,
+# no en esta máquina-. Es un directorio de desarrollo gitignored y
+# efímero, no un dato sensible, así que abrirlo del todo no es un riesgo.
 seed-data-repo-write: ## Siembra el remoto de git local de Fase 2 (una vez)
 	@mkdir -p .dev-data/repo-write
+	@chmod 777 .dev-data/repo-write
 	@if [ ! -d .dev-data/repo-write-remote.git ]; then \
 		echo "→ sembrando .dev-data/repo-write-remote.git"; \
 		git init --quiet --bare -b dev .dev-data/repo-write-remote.git; \
@@ -30,6 +41,7 @@ seed-data-repo-write: ## Siembra el remoto de git local de Fase 2 (una vez)
 		git -C "$$tmp" remote add origin "$$(pwd)/.dev-data/repo-write-remote.git"; \
 		git -C "$$tmp" push --quiet origin dev; \
 		rm -rf "$$tmp"; \
+		chmod -R a+rwX .dev-data/repo-write-remote.git; \
 	fi
 
 up: ## Levanta la app en local y aplica las migraciones
