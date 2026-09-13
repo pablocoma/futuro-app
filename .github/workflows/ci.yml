@@ -168,6 +168,12 @@ jobs:
           docker compose exec -T api sh -c 'python -c "import futuro_api.data_repo_write.git_ops as m; print(m.__file__)"'
           echo "--- respuesta real de /api/profile/objectives ---"
           curl -s -i http://localhost:8000/api/profile/objectives || true
+          echo "--- version de git dentro de api ---"
+          docker compose exec -T api git --version
+          echo "--- replica manual exacta del comando de _run(), misma uid ---"
+          docker compose exec -T api git -c 'safe.directory=*' clone --branch dev --origin origin /data/repo-write-remote.git /tmp/manual_probe 2>&1 || true
+          echo "--- git config -l --show-origin dentro de api ---"
+          docker compose exec -T api git config -l --show-origin || true
 
       - uses: actions/setup-node@v4
         with:
