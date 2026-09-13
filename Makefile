@@ -17,31 +17,49 @@ help: ## Lista los objetivos disponibles
 # propia app con su clon de trabajo-. Apuntar `DATA_REPO_WRITE_REMOTE` al
 # `Futuro` real es cosa de `.env`, igual que ya vale para `DATA_REPO_HOST_PATH`.
 #
-# `chmod 777`/`chmod -R a+rwX` a propósito: `api` corre como el usuario sin
-# privilegios `uid 10001` del `Dockerfile` (no el que ejecuta este target),
-# y un bind mount de Linux sí exige que ese uid pueda escribir de verdad
-# -a diferencia de Docker Desktop en Mac, que no lo comprueba y por eso
-# esto nunca se había notado en local-. Sin abrir el permiso, el primer
-# `git clone` del contenedor sobre `.dev-data/repo-write` falla con
-# «Permission denied» -así se descubrió, en la CI real de GitHub Actions,
-# no en esta máquina-. Es un directorio de desarrollo gitignored y
-# efímero, no un dato sensible, así que abrirlo del todo no es un riesgo.
+# `.dev-data/repo-write` se abre con `chmod 777`: `api` corre como el
+# usuario sin privilegios `uid 10001` del `Dockerfile` (no quien ejecuta
+# este target), y un bind mount de Linux de verdad sí exige que ese uid
+# pueda escribir -a diferencia de Docker Desktop en Mac, que no lo
+# comprueba y por eso esto nunca se había notado en local-. Sin esto, el
+# primer `git clone` del contenedor devuelve «Permission denied».
+#
+# El bare `repo-write-remote.git` se siembra **dentro de un contenedor con
+# `--user 10001`**, el mismo uid que usa `api`, y no con el `git` del host.
+# Con git moderno no basta con abrir permisos: si el bare quedara con el
+# dueño del host (el runner de CI, o quien ejecute `make` en local), el
+# contenedor se niega a clonarlo con "detected dubious ownership" -
+# comprobado contra la imagen real: ni `-c safe.directory=*` ni
+# `GIT_CONFIG_*` lo evitan, porque `clone` lee el remoto local con un
+# subproceso que no hereda ninguno de los dos-. Sembrando con el mismo uid
+# desde el principio, el dueño ya coincide y la comprobación nunca se
+# dispara; no hace falta abrir permisos en este directorio tampoco.
+# `alpine/git`, versión fijada, trae git ya instalado -no se puede
+# instalar con `apk` como `--user 10001`, que no tiene permiso de escribir
+# la base de datos de paquetes-.
 seed-data-repo-write: ## Siembra el remoto de git local de Fase 2 (una vez)
+	@mkdir -p .dev-data
+	@chmod 777 .dev-data
 	@mkdir -p .dev-data/repo-write
 	@chmod 777 .dev-data/repo-write
 	@if [ ! -d .dev-data/repo-write-remote.git ]; then \
 		echo "→ sembrando .dev-data/repo-write-remote.git"; \
-		git init --quiet --bare -b dev .dev-data/repo-write-remote.git; \
-		tmp=$$(mktemp -d); \
-		cp -r services/api/tests/fixtures/data_repo_write/. "$$tmp/"; \
-		git -C "$$tmp" init --quiet -b dev; \
-		git -C "$$tmp" add -A; \
-		git -C "$$tmp" -c user.name=seed -c user.email=seed@local \
-			commit --quiet -m seed; \
-		git -C "$$tmp" remote add origin "$$(pwd)/.dev-data/repo-write-remote.git"; \
-		git -C "$$tmp" push --quiet origin dev; \
-		rm -rf "$$tmp"; \
-		chmod -R a+rwX .dev-data/repo-write-remote.git; \
+		docker run --rm \
+			--user 10001:10001 \
+			-v "$$(pwd)/.dev-data":/seed \
+			-v "$$(pwd)/services/api/tests/fixtures/data_repo_write":/fixtures:ro \
+			--entrypoint sh alpine/git:2.49.1 -c '\
+				set -e; \
+				git init --quiet --bare -b dev /seed/repo-write-remote.git; \
+				mkdir -p /tmp/seed-work; \
+				cp -r /fixtures/. /tmp/seed-work/; \
+				cd /tmp/seed-work; \
+				git init --quiet -b dev; \
+				git add -A; \
+				git -c user.name=seed -c user.email=seed@local commit --quiet -m seed; \
+				git remote add origin /seed/repo-write-remote.git; \
+				git push --quiet origin dev; \
+			'; \
 	fi
 
 up: ## Levanta la app en local y aplica las migraciones
