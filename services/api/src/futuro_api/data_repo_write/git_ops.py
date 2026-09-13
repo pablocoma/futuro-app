@@ -14,18 +14,23 @@ este vive fuera del control de CI: `ensure_clone` clona una vez si el
 directorio no es todavía un repositorio git, y no hace nada si ya lo es.
 El deploy nunca lo toca.
 
-**Cada invocación de `git` lleva su propio `-c safe.directory=*`, y nada de
-`HOME` ni configuración global.** El directorio de trabajo es un volumen
-montado desde el host, con el dueño del host y no el `uid` del contenedor;
-sin esto, git moderno se niega a operar ("detected dubious ownership"). El
-mismo problema alcanza al remoto en `ensure_clone`, no solo al destino: en
-desarrollo y en CI es un bare local -otro volumen del host, mismo dueño
-ajeno al `uid` del contenedor-, así que el primer `clone` necesita el flag
-tanto como `pull`/`commit`/`push`, aunque no fije ningún `-C` porque el
-destino todavía no existe como repositorio. Acotarlo a `*` por invocación
--no en un `.gitconfig` global- es tan seguro como acotarlo al path exacto:
-no hay sesión que lo reutilice para otra cosa, y en producción el remoto
-es una URL de GitHub por SSH, ajena por completo a esta comprobación.
+**Cada invocación de `git` lleva `safe.directory=*` por entorno
+(`GIT_CONFIG_COUNT`/`_KEY_0`/`_VALUE_0`), nunca por `-c` ni por `HOME`.**
+El directorio de trabajo es un volumen montado desde el host, con el dueño
+del host y no el `uid` del contenedor; sin esto, git moderno se niega a
+operar ("detected dubious ownership"). El mismo problema alcanza al
+remoto en `ensure_clone`, no solo al destino: en desarrollo y en CI es un
+bare local -otro volumen del host, mismo dueño ajeno al `uid` del
+contenedor-, y ahí es donde `-c safe.directory=*` **no basta**: durante
+`clone`, git lee el remoto local con un subproceso propio que no hereda
+los `-c` del padre, así que el hijo vuelve a chocar con la misma
+comprobación aunque el proceso principal ya lleve el flag -confirmado
+contra la imagen real de este `Dockerfile`, no en abstracto-. Las
+variables de entorno sí las lee cualquier proceso `git`, heredado o no.
+Acotarlo a `*` por invocación -no en un `.gitconfig` global persistido- es
+tan seguro como acotarlo al path exacto: no hay sesión que lo reutilice
+para otra cosa, y en producción el remoto es una URL de GitHub por SSH,
+ajena por completo a esta comprobación.
 
 **Un conflicto aborta y no fuerza nada.** Ni en el `pull --rebase` ni en el
 `push`: la disciplina que pide `ARCHITECTURE.md` §5. El único intento de
@@ -139,14 +144,28 @@ def lock_for(path: Path) -> asyncio.Lock:
     return lock
 
 
+_SAFE_DIRECTORY_ENV = {
+    # `-c safe.directory=*` no basta: durante `clone`, git lee el remoto
+    # local con un subproceso propio que no hereda los `-c` del padre, y
+    # ese subproceso vuelve a chocar con "dubious ownership" aunque el
+    # proceso principal ya lleve el flag -confirmado contra la imagen real
+    # de este Dockerfile, no solo en teoría-. Las variables `GIT_CONFIG_*`
+    # sí las lee cualquier proceso `git`, heredado o no, porque viajan por
+    # el entorno y no por argv.
+    "GIT_CONFIG_COUNT": "1",
+    "GIT_CONFIG_KEY_0": "safe.directory",
+    "GIT_CONFIG_VALUE_0": "*",
+}
+
+
 def _run(
     path: Path | None, *args: str, env: dict[str, str] | None = None
 ) -> subprocess.CompletedProcess[str]:
-    command = ["git", "-c", "safe.directory=*"]
+    command = ["git"]
     if path is not None:
         command += ["-C", str(path)]
     command += list(args)
-    full_env = {**os.environ, **env} if env else None
+    full_env = {**os.environ, **_SAFE_DIRECTORY_ENV, **(env or {})}
     return subprocess.run(command, capture_output=True, text=True, env=full_env)
 
 

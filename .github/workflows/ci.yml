@@ -157,24 +157,6 @@ jobs:
           # falla, que es justo lo que el E2E viene a comprobar.
           docker compose exec -T api alembic upgrade head
 
-      - name: DEBUG temporal 3, quitar antes de mergear
-        run: |
-          echo "--- docker compose version ---"
-          docker compose version
-          echo "--- volumes resueltos para api ---"
-          docker compose config | awk '/^  api:/{f=1} f && /^  [a-z]/ && !/^  api:/{f=0} f'
-          echo "--- safe.directory en el git_ops.py que ve el contenedor ---"
-          docker compose exec -T api grep -n "safe.directory" /app/src/futuro_api/data_repo_write/git_ops.py || echo "NO ENCONTRADO en /app/src"
-          docker compose exec -T api sh -c 'python -c "import futuro_api.data_repo_write.git_ops as m; print(m.__file__)"'
-          echo "--- respuesta real de /api/profile/objectives ---"
-          curl -s -i http://localhost:8000/api/profile/objectives || true
-          echo "--- version de git dentro de api ---"
-          docker compose exec -T api git --version
-          echo "--- replica manual exacta del comando de _run(), misma uid ---"
-          docker compose exec -T api git -c 'safe.directory=*' clone --branch dev --origin origin /data/repo-write-remote.git /tmp/manual_probe 2>&1 || true
-          echo "--- git config -l --show-origin dentro de api ---"
-          docker compose exec -T api git config -l --show-origin || true
-
       - uses: actions/setup-node@v4
         with:
           node-version: 24
