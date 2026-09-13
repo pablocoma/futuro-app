@@ -6,6 +6,7 @@ probar una carrera ni un conflicto.
 
 from __future__ import annotations
 
+import asyncio
 import subprocess
 from pathlib import Path
 
@@ -34,11 +35,11 @@ def _remote(bare: Path) -> GitRemote:
     return GitRemote(url=str(bare), branch="dev")
 
 
-def test_ensure_clone_clona_una_vez(tmp_path: Path, bare_remote: Path) -> None:
+async def test_ensure_clone_clona_una_vez(tmp_path: Path, bare_remote: Path) -> None:
     work = tmp_path / "work"
     remote = _remote(bare_remote)
 
-    git_ops.ensure_clone(work, remote)
+    await git_ops.ensure_clone(work, remote)
     assert (work / "config" / "objectives.yaml").is_file()
     assert (work / "config" / "objectives.yaml").read_text() == (
         DATA_REPO_WRITE_SEED / "config" / "objectives.yaml"
@@ -46,31 +47,31 @@ def test_ensure_clone_clona_una_vez(tmp_path: Path, bare_remote: Path) -> None:
 
     # Segunda llamada: el directorio ya es un repo git, no hace nada.
     (work / "config" / "objectives.yaml").write_text("cambiado a mano\n")
-    git_ops.ensure_clone(work, remote)
+    await git_ops.ensure_clone(work, remote)
     assert (work / "config" / "objectives.yaml").read_text() == "cambiado a mano\n"
 
 
-def test_pull_rebase_sin_cambios_remotos_no_hace_nada_raro(
+async def test_pull_rebase_sin_cambios_remotos_no_hace_nada_raro(
     tmp_path: Path, bare_remote: Path
 ) -> None:
     work = tmp_path / "work"
     remote = _remote(bare_remote)
-    git_ops.ensure_clone(work, remote)
+    await git_ops.ensure_clone(work, remote)
 
-    git_ops.pull_rebase(
+    await git_ops.pull_rebase(
         work, remote, author_name="Futuro App", author_email="bot@futuro.local"
     )  # no debe lanzar
 
 
-def test_commit_and_push_avanza_el_remoto_con_la_autoria_dada(
+async def test_commit_and_push_avanza_el_remoto_con_la_autoria_dada(
     tmp_path: Path, bare_remote: Path
 ) -> None:
     work = tmp_path / "work"
     remote = _remote(bare_remote)
-    git_ops.ensure_clone(work, remote)
+    await git_ops.ensure_clone(work, remote)
 
     (work / "config" / "objectives.yaml").write_text("version: 2\n")
-    sha = git_ops.commit_and_push(
+    sha = await git_ops.commit_and_push(
         work,
         remote,
         ["config/objectives.yaml"],
@@ -84,7 +85,7 @@ def test_commit_and_push_avanza_el_remoto_con_la_autoria_dada(
     assert "Futuro App <bot@futuro.local>" in log.stdout
 
 
-def test_commit_and_push_reintenta_tras_una_carrera_sin_conflicto_de_verdad(
+async def test_commit_and_push_reintenta_tras_una_carrera_sin_conflicto_de_verdad(
     tmp_path: Path, bare_remote: Path
 ) -> None:
     """Dos clones -como tu portátil y la app- escribiendo al mismo remoto en
@@ -95,12 +96,12 @@ def test_commit_and_push_reintenta_tras_una_carrera_sin_conflicto_de_verdad(
     remote = _remote(bare_remote)
 
     work_a = tmp_path / "work_a"
-    git_ops.ensure_clone(work_a, remote)
+    await git_ops.ensure_clone(work_a, remote)
     work_b = tmp_path / "work_b"
-    git_ops.ensure_clone(work_b, remote)
+    await git_ops.ensure_clone(work_b, remote)
 
     (work_a / "config" / "objectives.yaml").write_text("version: 2\n")
-    git_ops.commit_and_push(
+    await git_ops.commit_and_push(
         work_a,
         remote,
         ["config/objectives.yaml"],
@@ -111,7 +112,7 @@ def test_commit_and_push_reintenta_tras_una_carrera_sin_conflicto_de_verdad(
 
     # B no ha visto el cambio de A: escribe un fichero distinto.
     (work_b / "otro.yaml").write_text("x: 1\n")
-    sha_b = git_ops.commit_and_push(
+    sha_b = await git_ops.commit_and_push(
         work_b,
         remote,
         ["otro.yaml"],
@@ -126,18 +127,18 @@ def test_commit_and_push_reintenta_tras_una_carrera_sin_conflicto_de_verdad(
     assert len(shas) == 3  # seed + a + b
 
 
-def test_commit_and_push_no_fuerza_un_conflicto_de_verdad(
+async def test_commit_and_push_no_fuerza_un_conflicto_de_verdad(
     tmp_path: Path, bare_remote: Path
 ) -> None:
     remote = _remote(bare_remote)
 
     work_a = tmp_path / "work_a"
-    git_ops.ensure_clone(work_a, remote)
+    await git_ops.ensure_clone(work_a, remote)
     work_b = tmp_path / "work_b"
-    git_ops.ensure_clone(work_b, remote)
+    await git_ops.ensure_clone(work_b, remote)
 
     (work_a / "config" / "objectives.yaml").write_text("version: 2\n")
-    git_ops.commit_and_push(
+    await git_ops.commit_and_push(
         work_a,
         remote,
         ["config/objectives.yaml"],
@@ -149,7 +150,7 @@ def test_commit_and_push_no_fuerza_un_conflicto_de_verdad(
     # B edita la misma línea sin haber visto el cambio de A: choque real.
     (work_b / "config" / "objectives.yaml").write_text("version: 3\n")
     with pytest.raises(GitConflictError):
-        git_ops.commit_and_push(
+        await git_ops.commit_and_push(
             work_b,
             remote,
             ["config/objectives.yaml"],
@@ -167,7 +168,7 @@ def test_commit_and_push_no_fuerza_un_conflicto_de_verdad(
     assert log.stdout.strip() == "b"
 
 
-def test_commit_and_push_sin_cambios_no_falla_y_devuelve_el_head_actual(
+async def test_commit_and_push_sin_cambios_no_falla_y_devuelve_el_head_actual(
     tmp_path: Path, bare_remote: Path
 ) -> None:
     """Confirmar sin haber tocado nada -o pulsar el botón dos veces- no es
@@ -177,10 +178,10 @@ def test_commit_and_push_sin_cambios_no_falla_y_devuelve_el_head_actual(
     """
     work = tmp_path / "work"
     remote = _remote(bare_remote)
-    git_ops.ensure_clone(work, remote)
+    await git_ops.ensure_clone(work, remote)
 
     before = _git(work, "rev-parse", "HEAD").stdout.strip()
-    sha = git_ops.commit_and_push(
+    sha = await git_ops.commit_and_push(
         work,
         remote,
         ["config/objectives.yaml"],
@@ -192,3 +193,49 @@ def test_commit_and_push_sin_cambios_no_falla_y_devuelve_el_head_actual(
     assert sha == before
     log = _git(bare_remote, "log", "--format=%H", "dev")
     assert len(log.stdout.split()) == 1  # nada nuevo llegó al remoto
+
+
+async def test_concurrent_requests_on_the_same_clone_do_not_corrupt_git(
+    tmp_path: Path, bare_remote: Path
+) -> None:
+    """El bug real que arregló el lock, y no un choque de contenido.
+
+    `router.py` sostiene `git_ops.lock_for(root)` desde `pull_rebase` hasta
+    `commit_and_push` -incluida la escritura en disco de en medio, que vive
+    en otro módulo-. Sin ese lock, dos peticiones a `/perfil` corriendo de
+    verdad al mismo tiempo -algo que `asyncio.to_thread` por sí solo hace
+    posible- encontraban "fatal: Cannot rebase onto multiple branches" sin
+    que ningún contenido hubiera chocado nunca: es como se descubrió,
+    arreglando primero el bloqueo del *event loop* y viendo la CI seguir en
+    rojo por esto. Cada tarea toca un fichero distinto -sin ninguna carrera
+    de contenido de por medio, que es un problema aparte y ya aceptado
+    (ver `docs/decisions/fase-2-perfil-editable.md`)-, así que si el lock
+    funciona, las diez entran; si no, `asyncio.gather` propaga la primera
+    excepción de git.
+    """
+    work = tmp_path / "work"
+    remote = _remote(bare_remote)
+    await git_ops.ensure_clone(work, remote)
+
+    async def one_request(marker: str) -> None:
+        async with git_ops.lock_for(work):
+            await git_ops.pull_rebase(
+                work,
+                remote,
+                author_name="Futuro App",
+                author_email="bot@futuro.local",
+            )
+            (work / f"{marker}.yaml").write_text(f"{marker}: true\n")
+            await git_ops.commit_and_push(
+                work,
+                remote,
+                [f"{marker}.yaml"],
+                message=f"añadir {marker}",
+                author_name="Futuro App",
+                author_email="bot@futuro.local",
+            )
+
+    await asyncio.gather(*(one_request(f"marker_{i}") for i in range(10)))
+
+    log = _git(bare_remote, "log", "--format=%H", "dev")
+    assert len(log.stdout.split()) == 11  # la semilla + los diez commits

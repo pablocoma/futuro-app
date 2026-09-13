@@ -95,10 +95,10 @@ def _conflict(error: git_ops.GitConflictError) -> HTTPException:
     return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error))
 
 
-def _sync(root: Path, remote: GitRemote) -> None:
+async def _sync(root: Path, remote: GitRemote) -> None:
     try:
-        git_ops.ensure_clone(root, remote)
-        git_ops.pull_rebase(
+        await git_ops.ensure_clone(root, remote)
+        await git_ops.pull_rebase(
             root, remote, author_name=AUTHOR_NAME, author_email=AUTHOR_EMAIL
         )
     except git_ops.GitConflictError as error:
@@ -122,8 +122,9 @@ class ObjectivesCommitResponse(BaseModel):
 @router.get("/objectives", summary="El objectives.yaml vigente")
 async def get_objectives(request: Request) -> Objectives:
     root, remote = _configured(request)
-    _sync(root, remote)
-    return objectives.current(root)
+    async with git_ops.lock_for(root):
+        await _sync(root, remote)
+        return objectives.current(root)
 
 
 @router.post(
@@ -134,14 +135,17 @@ async def diff_objectives(
     request: Request, edit: Annotated[EditableObjectives, Body()]
 ) -> ObjectivesDiffResponse:
     root, remote = _configured(request)
-    _sync(root, remote)
-    try:
-        result = objectives.prepare(root, edit, today=date.today())
-    except objectives.ObjectivesValidationError as error:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
-        ) from error
-    return ObjectivesDiffResponse(diff=result.unified_diff, validated=result.validated)
+    async with git_ops.lock_for(root):
+        await _sync(root, remote)
+        try:
+            result = objectives.prepare(root, edit, today=date.today())
+        except objectives.ObjectivesValidationError as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+            ) from error
+        return ObjectivesDiffResponse(
+            diff=result.unified_diff, validated=result.validated
+        )
 
 
 @router.post(
@@ -153,31 +157,32 @@ async def commit_objectives(
     request: Request, edit: Annotated[EditableObjectives, Body()]
 ) -> ObjectivesCommitResponse:
     root, remote = _configured(request)
-    _sync(root, remote)
-    try:
-        result = objectives.write(root, edit, today=date.today())
-    except objectives.ObjectivesValidationError as error:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
-        ) from error
+    async with git_ops.lock_for(root):
+        await _sync(root, remote)
+        try:
+            result = objectives.write(root, edit, today=date.today())
+        except objectives.ObjectivesValidationError as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+            ) from error
 
-    try:
-        sha = git_ops.commit_and_push(
-            root,
-            remote,
-            [objectives.RELATIVE_PATH],
-            message="profile: actualizar config/objectives.yaml",
-            author_name=AUTHOR_NAME,
-            author_email=AUTHOR_EMAIL,
-        )
-    except git_ops.GitConflictError as error:
-        raise _conflict(error) from error
-    except git_ops.GitOpsError as error:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)
-        ) from error
+        try:
+            sha = await git_ops.commit_and_push(
+                root,
+                remote,
+                [objectives.RELATIVE_PATH],
+                message="profile: actualizar config/objectives.yaml",
+                author_name=AUTHOR_NAME,
+                author_email=AUTHOR_EMAIL,
+            )
+        except git_ops.GitConflictError as error:
+            raise _conflict(error) from error
+        except git_ops.GitOpsError as error:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)
+            ) from error
 
-    return ObjectivesCommitResponse(commit_sha=sha, diff=result.unified_diff)
+        return ObjectivesCommitResponse(commit_sha=sha, diff=result.unified_diff)
 
 
 class PreferencesDiffResponse(BaseModel):
@@ -193,8 +198,9 @@ class PreferencesCommitResponse(BaseModel):
 @router.get("/preferences", summary="El preferences.yaml vigente")
 async def get_preferences(request: Request) -> Preferences:
     root, remote = _configured(request)
-    _sync(root, remote)
-    return preferences.current(root)
+    async with git_ops.lock_for(root):
+        await _sync(root, remote)
+        return preferences.current(root)
 
 
 @router.post(
@@ -205,14 +211,17 @@ async def diff_preferences(
     request: Request, edit: Annotated[EditablePreferences, Body()]
 ) -> PreferencesDiffResponse:
     root, remote = _configured(request)
-    _sync(root, remote)
-    try:
-        result = preferences.prepare(root, edit, today=date.today())
-    except preferences.PreferencesValidationError as error:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
-        ) from error
-    return PreferencesDiffResponse(diff=result.unified_diff, validated=result.validated)
+    async with git_ops.lock_for(root):
+        await _sync(root, remote)
+        try:
+            result = preferences.prepare(root, edit, today=date.today())
+        except preferences.PreferencesValidationError as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+            ) from error
+        return PreferencesDiffResponse(
+            diff=result.unified_diff, validated=result.validated
+        )
 
 
 @router.post(
@@ -224,31 +233,32 @@ async def commit_preferences(
     request: Request, edit: Annotated[EditablePreferences, Body()]
 ) -> PreferencesCommitResponse:
     root, remote = _configured(request)
-    _sync(root, remote)
-    try:
-        result = preferences.write(root, edit, today=date.today())
-    except preferences.PreferencesValidationError as error:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
-        ) from error
+    async with git_ops.lock_for(root):
+        await _sync(root, remote)
+        try:
+            result = preferences.write(root, edit, today=date.today())
+        except preferences.PreferencesValidationError as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+            ) from error
 
-    try:
-        sha = git_ops.commit_and_push(
-            root,
-            remote,
-            [preferences.RELATIVE_PATH],
-            message="profile: actualizar config/preferences.yaml",
-            author_name=AUTHOR_NAME,
-            author_email=AUTHOR_EMAIL,
-        )
-    except git_ops.GitConflictError as error:
-        raise _conflict(error) from error
-    except git_ops.GitOpsError as error:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)
-        ) from error
+        try:
+            sha = await git_ops.commit_and_push(
+                root,
+                remote,
+                [preferences.RELATIVE_PATH],
+                message="profile: actualizar config/preferences.yaml",
+                author_name=AUTHOR_NAME,
+                author_email=AUTHOR_EMAIL,
+            )
+        except git_ops.GitConflictError as error:
+            raise _conflict(error) from error
+        except git_ops.GitOpsError as error:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)
+            ) from error
 
-    return PreferencesCommitResponse(commit_sha=sha, diff=result.unified_diff)
+        return PreferencesCommitResponse(commit_sha=sha, diff=result.unified_diff)
 
 
 class ConstraintsDiffResponse(BaseModel):
@@ -264,8 +274,9 @@ class ConstraintsCommitResponse(BaseModel):
 @router.get("/constraints", summary="El constraints.yaml vigente")
 async def get_constraints(request: Request) -> Constraints:
     root, remote = _configured(request)
-    _sync(root, remote)
-    return constraints.current(root)
+    async with git_ops.lock_for(root):
+        await _sync(root, remote)
+        return constraints.current(root)
 
 
 @router.post(
@@ -276,14 +287,17 @@ async def diff_constraints(
     request: Request, edit: Annotated[EditableConstraints, Body()]
 ) -> ConstraintsDiffResponse:
     root, remote = _configured(request)
-    _sync(root, remote)
-    try:
-        result = constraints.prepare(root, edit, today=date.today())
-    except constraints.ConstraintsValidationError as error:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
-        ) from error
-    return ConstraintsDiffResponse(diff=result.unified_diff, validated=result.validated)
+    async with git_ops.lock_for(root):
+        await _sync(root, remote)
+        try:
+            result = constraints.prepare(root, edit, today=date.today())
+        except constraints.ConstraintsValidationError as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+            ) from error
+        return ConstraintsDiffResponse(
+            diff=result.unified_diff, validated=result.validated
+        )
 
 
 @router.post(
@@ -295,31 +309,32 @@ async def commit_constraints(
     request: Request, edit: Annotated[EditableConstraints, Body()]
 ) -> ConstraintsCommitResponse:
     root, remote = _configured(request)
-    _sync(root, remote)
-    try:
-        result = constraints.write(root, edit, today=date.today())
-    except constraints.ConstraintsValidationError as error:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
-        ) from error
+    async with git_ops.lock_for(root):
+        await _sync(root, remote)
+        try:
+            result = constraints.write(root, edit, today=date.today())
+        except constraints.ConstraintsValidationError as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+            ) from error
 
-    try:
-        sha = git_ops.commit_and_push(
-            root,
-            remote,
-            [constraints.RELATIVE_PATH],
-            message="profile: actualizar config/constraints.yaml",
-            author_name=AUTHOR_NAME,
-            author_email=AUTHOR_EMAIL,
-        )
-    except git_ops.GitConflictError as error:
-        raise _conflict(error) from error
-    except git_ops.GitOpsError as error:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)
-        ) from error
+        try:
+            sha = await git_ops.commit_and_push(
+                root,
+                remote,
+                [constraints.RELATIVE_PATH],
+                message="profile: actualizar config/constraints.yaml",
+                author_name=AUTHOR_NAME,
+                author_email=AUTHOR_EMAIL,
+            )
+        except git_ops.GitConflictError as error:
+            raise _conflict(error) from error
+        except git_ops.GitOpsError as error:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)
+            ) from error
 
-    return ConstraintsCommitResponse(commit_sha=sha, diff=result.unified_diff)
+        return ConstraintsCommitResponse(commit_sha=sha, diff=result.unified_diff)
 
 
 class BulletBankDiffResponse(BaseModel):
@@ -335,8 +350,9 @@ class BulletBankCommitResponse(BaseModel):
 @router.get("/bullet-bank", summary="El professional_bullet_bank.yaml vigente")
 async def get_bullet_bank(request: Request) -> BulletBank:
     root, remote = _configured(request)
-    _sync(root, remote)
-    return bullet_bank.current(root)
+    async with git_ops.lock_for(root):
+        await _sync(root, remote)
+        return bullet_bank.current(root)
 
 
 @router.post(
@@ -347,14 +363,17 @@ async def diff_bullet_bank(
     request: Request, edit: Annotated[EditableBulletBank, Body()]
 ) -> BulletBankDiffResponse:
     root, remote = _configured(request)
-    _sync(root, remote)
-    try:
-        result = bullet_bank.prepare(root, edit, today=date.today())
-    except bullet_bank.BulletBankValidationError as error:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
-        ) from error
-    return BulletBankDiffResponse(diff=result.unified_diff, validated=result.validated)
+    async with git_ops.lock_for(root):
+        await _sync(root, remote)
+        try:
+            result = bullet_bank.prepare(root, edit, today=date.today())
+        except bullet_bank.BulletBankValidationError as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+            ) from error
+        return BulletBankDiffResponse(
+            diff=result.unified_diff, validated=result.validated
+        )
 
 
 @router.post(
@@ -366,31 +385,32 @@ async def commit_bullet_bank(
     request: Request, edit: Annotated[EditableBulletBank, Body()]
 ) -> BulletBankCommitResponse:
     root, remote = _configured(request)
-    _sync(root, remote)
-    try:
-        result = bullet_bank.write(root, edit, today=date.today())
-    except bullet_bank.BulletBankValidationError as error:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
-        ) from error
+    async with git_ops.lock_for(root):
+        await _sync(root, remote)
+        try:
+            result = bullet_bank.write(root, edit, today=date.today())
+        except bullet_bank.BulletBankValidationError as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+            ) from error
 
-    try:
-        sha = git_ops.commit_and_push(
-            root,
-            remote,
-            [bullet_bank.RELATIVE_PATH],
-            message="profile: actualizar cv/content/professional_bullet_bank.yaml",
-            author_name=AUTHOR_NAME,
-            author_email=AUTHOR_EMAIL,
-        )
-    except git_ops.GitConflictError as error:
-        raise _conflict(error) from error
-    except git_ops.GitOpsError as error:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)
-        ) from error
+        try:
+            sha = await git_ops.commit_and_push(
+                root,
+                remote,
+                [bullet_bank.RELATIVE_PATH],
+                message="profile: actualizar cv/content/professional_bullet_bank.yaml",
+                author_name=AUTHOR_NAME,
+                author_email=AUTHOR_EMAIL,
+            )
+        except git_ops.GitConflictError as error:
+            raise _conflict(error) from error
+        except git_ops.GitOpsError as error:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)
+            ) from error
 
-    return BulletBankCommitResponse(commit_sha=sha, diff=result.unified_diff)
+        return BulletBankCommitResponse(commit_sha=sha, diff=result.unified_diff)
 
 
 class RoleVariantContentDiffResponse(BaseModel):
@@ -406,8 +426,9 @@ class RoleVariantContentCommitResponse(BaseModel):
 @router.get("/role-variants", summary="El role_variant_content.yaml vigente")
 async def get_role_variants(request: Request) -> RoleVariantContent:
     root, remote = _configured(request)
-    _sync(root, remote)
-    return role_variant_content.current(root)
+    async with git_ops.lock_for(root):
+        await _sync(root, remote)
+        return role_variant_content.current(root)
 
 
 @router.post(
@@ -418,16 +439,17 @@ async def diff_role_variants(
     request: Request, edit: Annotated[EditableRoleVariantContent, Body()]
 ) -> RoleVariantContentDiffResponse:
     root, remote = _configured(request)
-    _sync(root, remote)
-    try:
-        result = role_variant_content.prepare(root, edit, today=date.today())
-    except role_variant_content.RoleVariantContentValidationError as error:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
-        ) from error
-    return RoleVariantContentDiffResponse(
-        diff=result.unified_diff, validated=result.validated
-    )
+    async with git_ops.lock_for(root):
+        await _sync(root, remote)
+        try:
+            result = role_variant_content.prepare(root, edit, today=date.today())
+        except role_variant_content.RoleVariantContentValidationError as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+            ) from error
+        return RoleVariantContentDiffResponse(
+            diff=result.unified_diff, validated=result.validated
+        )
 
 
 @router.post(
@@ -439,31 +461,34 @@ async def commit_role_variants(
     request: Request, edit: Annotated[EditableRoleVariantContent, Body()]
 ) -> RoleVariantContentCommitResponse:
     root, remote = _configured(request)
-    _sync(root, remote)
-    try:
-        result = role_variant_content.write(root, edit, today=date.today())
-    except role_variant_content.RoleVariantContentValidationError as error:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
-        ) from error
+    async with git_ops.lock_for(root):
+        await _sync(root, remote)
+        try:
+            result = role_variant_content.write(root, edit, today=date.today())
+        except role_variant_content.RoleVariantContentValidationError as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+            ) from error
 
-    try:
-        sha = git_ops.commit_and_push(
-            root,
-            remote,
-            [role_variant_content.RELATIVE_PATH],
-            message="profile: actualizar cv/content/role_variant_content.yaml",
-            author_name=AUTHOR_NAME,
-            author_email=AUTHOR_EMAIL,
+        try:
+            sha = await git_ops.commit_and_push(
+                root,
+                remote,
+                [role_variant_content.RELATIVE_PATH],
+                message="profile: actualizar cv/content/role_variant_content.yaml",
+                author_name=AUTHOR_NAME,
+                author_email=AUTHOR_EMAIL,
+            )
+        except git_ops.GitConflictError as error:
+            raise _conflict(error) from error
+        except git_ops.GitOpsError as error:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)
+            ) from error
+
+        return RoleVariantContentCommitResponse(
+            commit_sha=sha, diff=result.unified_diff
         )
-    except git_ops.GitConflictError as error:
-        raise _conflict(error) from error
-    except git_ops.GitOpsError as error:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)
-        ) from error
-
-    return RoleVariantContentCommitResponse(commit_sha=sha, diff=result.unified_diff)
 
 
 class CvVariantsDiffResponse(BaseModel):
@@ -479,8 +504,9 @@ class CvVariantsCommitResponse(BaseModel):
 @router.get("/cv-variants", summary="El cv_variants.yaml vigente")
 async def get_cv_variants(request: Request) -> CvVariants:
     root, remote = _configured(request)
-    _sync(root, remote)
-    return cv_variants.current(root)
+    async with git_ops.lock_for(root):
+        await _sync(root, remote)
+        return cv_variants.current(root)
 
 
 @router.post(
@@ -491,14 +517,17 @@ async def diff_cv_variants(
     request: Request, edit: Annotated[EditableCvVariants, Body()]
 ) -> CvVariantsDiffResponse:
     root, remote = _configured(request)
-    _sync(root, remote)
-    try:
-        result = cv_variants.prepare(root, edit, today=date.today())
-    except cv_variants.CvVariantsValidationError as error:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
-        ) from error
-    return CvVariantsDiffResponse(diff=result.unified_diff, validated=result.validated)
+    async with git_ops.lock_for(root):
+        await _sync(root, remote)
+        try:
+            result = cv_variants.prepare(root, edit, today=date.today())
+        except cv_variants.CvVariantsValidationError as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+            ) from error
+        return CvVariantsDiffResponse(
+            diff=result.unified_diff, validated=result.validated
+        )
 
 
 @router.post(
@@ -510,31 +539,32 @@ async def commit_cv_variants(
     request: Request, edit: Annotated[EditableCvVariants, Body()]
 ) -> CvVariantsCommitResponse:
     root, remote = _configured(request)
-    _sync(root, remote)
-    try:
-        result = cv_variants.write(root, edit, today=date.today())
-    except cv_variants.CvVariantsValidationError as error:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
-        ) from error
+    async with git_ops.lock_for(root):
+        await _sync(root, remote)
+        try:
+            result = cv_variants.write(root, edit, today=date.today())
+        except cv_variants.CvVariantsValidationError as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+            ) from error
 
-    try:
-        sha = git_ops.commit_and_push(
-            root,
-            remote,
-            [cv_variants.RELATIVE_PATH],
-            message="profile: actualizar config/cv_variants.yaml",
-            author_name=AUTHOR_NAME,
-            author_email=AUTHOR_EMAIL,
-        )
-    except git_ops.GitConflictError as error:
-        raise _conflict(error) from error
-    except git_ops.GitOpsError as error:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)
-        ) from error
+        try:
+            sha = await git_ops.commit_and_push(
+                root,
+                remote,
+                [cv_variants.RELATIVE_PATH],
+                message="profile: actualizar config/cv_variants.yaml",
+                author_name=AUTHOR_NAME,
+                author_email=AUTHOR_EMAIL,
+            )
+        except git_ops.GitConflictError as error:
+            raise _conflict(error) from error
+        except git_ops.GitOpsError as error:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)
+            ) from error
 
-    return CvVariantsCommitResponse(commit_sha=sha, diff=result.unified_diff)
+        return CvVariantsCommitResponse(commit_sha=sha, diff=result.unified_diff)
 
 
 class ProjectCatalogDiffResponse(BaseModel):
@@ -550,8 +580,9 @@ class ProjectCatalogCommitResponse(BaseModel):
 @router.get("/project-catalog", summary="El project_catalog.yaml vigente")
 async def get_project_catalog(request: Request) -> ProjectCatalog:
     root, remote = _configured(request)
-    _sync(root, remote)
-    return project_catalog.current(root)
+    async with git_ops.lock_for(root):
+        await _sync(root, remote)
+        return project_catalog.current(root)
 
 
 @router.post(
@@ -562,16 +593,17 @@ async def diff_project_catalog(
     request: Request, edit: Annotated[EditableProjectCatalog, Body()]
 ) -> ProjectCatalogDiffResponse:
     root, remote = _configured(request)
-    _sync(root, remote)
-    try:
-        result = project_catalog.prepare(root, edit, today=date.today())
-    except project_catalog.ProjectCatalogValidationError as error:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
-        ) from error
-    return ProjectCatalogDiffResponse(
-        diff=result.unified_diff, validated=result.validated
-    )
+    async with git_ops.lock_for(root):
+        await _sync(root, remote)
+        try:
+            result = project_catalog.prepare(root, edit, today=date.today())
+        except project_catalog.ProjectCatalogValidationError as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+            ) from error
+        return ProjectCatalogDiffResponse(
+            diff=result.unified_diff, validated=result.validated
+        )
 
 
 @router.post(
@@ -583,31 +615,32 @@ async def commit_project_catalog(
     request: Request, edit: Annotated[EditableProjectCatalog, Body()]
 ) -> ProjectCatalogCommitResponse:
     root, remote = _configured(request)
-    _sync(root, remote)
-    try:
-        result = project_catalog.write(root, edit, today=date.today())
-    except project_catalog.ProjectCatalogValidationError as error:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
-        ) from error
+    async with git_ops.lock_for(root):
+        await _sync(root, remote)
+        try:
+            result = project_catalog.write(root, edit, today=date.today())
+        except project_catalog.ProjectCatalogValidationError as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+            ) from error
 
-    try:
-        sha = git_ops.commit_and_push(
-            root,
-            remote,
-            [project_catalog.RELATIVE_PATH],
-            message="profile: actualizar profile/project_catalog.yaml",
-            author_name=AUTHOR_NAME,
-            author_email=AUTHOR_EMAIL,
-        )
-    except git_ops.GitConflictError as error:
-        raise _conflict(error) from error
-    except git_ops.GitOpsError as error:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)
-        ) from error
+        try:
+            sha = await git_ops.commit_and_push(
+                root,
+                remote,
+                [project_catalog.RELATIVE_PATH],
+                message="profile: actualizar profile/project_catalog.yaml",
+                author_name=AUTHOR_NAME,
+                author_email=AUTHOR_EMAIL,
+            )
+        except git_ops.GitConflictError as error:
+            raise _conflict(error) from error
+        except git_ops.GitOpsError as error:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)
+            ) from error
 
-    return ProjectCatalogCommitResponse(commit_sha=sha, diff=result.unified_diff)
+        return ProjectCatalogCommitResponse(commit_sha=sha, diff=result.unified_diff)
 
 
 class ScoringModelDiffResponse(BaseModel):
@@ -623,8 +656,9 @@ class ScoringModelCommitResponse(BaseModel):
 @router.get("/scoring-model", summary="El scoring_model.yaml vigente")
 async def get_scoring_model(request: Request) -> ScoringModel:
     root, remote = _configured(request)
-    _sync(root, remote)
-    return scoring_model.current(root)
+    async with git_ops.lock_for(root):
+        await _sync(root, remote)
+        return scoring_model.current(root)
 
 
 @router.post(
@@ -635,16 +669,17 @@ async def diff_scoring_model(
     request: Request, edit: Annotated[EditableScoringModel, Body()]
 ) -> ScoringModelDiffResponse:
     root, remote = _configured(request)
-    _sync(root, remote)
-    try:
-        result = scoring_model.prepare(root, edit, today=date.today())
-    except scoring_model.ScoringModelValidationError as error:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
-        ) from error
-    return ScoringModelDiffResponse(
-        diff=result.unified_diff, validated=result.validated
-    )
+    async with git_ops.lock_for(root):
+        await _sync(root, remote)
+        try:
+            result = scoring_model.prepare(root, edit, today=date.today())
+        except scoring_model.ScoringModelValidationError as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+            ) from error
+        return ScoringModelDiffResponse(
+            diff=result.unified_diff, validated=result.validated
+        )
 
 
 @router.post(
@@ -656,28 +691,29 @@ async def commit_scoring_model(
     request: Request, edit: Annotated[EditableScoringModel, Body()]
 ) -> ScoringModelCommitResponse:
     root, remote = _configured(request)
-    _sync(root, remote)
-    try:
-        result = scoring_model.write(root, edit, today=date.today())
-    except scoring_model.ScoringModelValidationError as error:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
-        ) from error
+    async with git_ops.lock_for(root):
+        await _sync(root, remote)
+        try:
+            result = scoring_model.write(root, edit, today=date.today())
+        except scoring_model.ScoringModelValidationError as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+            ) from error
 
-    try:
-        sha = git_ops.commit_and_push(
-            root,
-            remote,
-            [scoring_model.RELATIVE_PATH],
-            message="profile: actualizar config/scoring_model.yaml",
-            author_name=AUTHOR_NAME,
-            author_email=AUTHOR_EMAIL,
-        )
-    except git_ops.GitConflictError as error:
-        raise _conflict(error) from error
-    except git_ops.GitOpsError as error:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)
-        ) from error
+        try:
+            sha = await git_ops.commit_and_push(
+                root,
+                remote,
+                [scoring_model.RELATIVE_PATH],
+                message="profile: actualizar config/scoring_model.yaml",
+                author_name=AUTHOR_NAME,
+                author_email=AUTHOR_EMAIL,
+            )
+        except git_ops.GitConflictError as error:
+            raise _conflict(error) from error
+        except git_ops.GitOpsError as error:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)
+            ) from error
 
-    return ScoringModelCommitResponse(commit_sha=sha, diff=result.unified_diff)
+        return ScoringModelCommitResponse(commit_sha=sha, diff=result.unified_diff)

@@ -27,10 +27,44 @@ el único repositorio sobre el que opera.
 recuperarse solo es un reintento de `push` tras un `pull --rebase` fresco,
 para el caso más común -una carrera con otra escritura, no un choque de
 contenido de verdad-.
+
+**Las tres funciones públicas son `async` por fuera y bloqueantes por
+dentro, nunca al revés.** `subprocess.run` bloquea de verdad, y estas
+rutas son `async def` en FastAPI: sin `asyncio.to_thread`, una sola
+petición haciendo `pull --rebase` congela el *event loop* entero -no solo
+esa petición, cualquier otra que llegue mientras tanto, incluida una que
+no tenga nada que ver con el perfil-. Con ocho ficheros editables y una
+pantalla que consulta los ocho al cargar, eso encola peticiones el tiempo
+suficiente para que un entorno más lento que un portátil -una máquina de
+CI compartida- empiece a superar los tiempos de espera de los tests, sin
+que ningún `git` haya chocado nunca: se descubrió así, con la CI en rojo
+en `perfil.spec.ts` dos sesiones seguidas y ningún error de git en los
+logs. La mitad bloqueante se queda tal cual -son las mismas llamadas de
+siempre, en una función `_sync`- y solo se ejecuta en un hilo aparte.
+
+**`lock_for(path)` es público y el llamador lo sostiene durante toda la
+petición, no solo durante cada llamada de git.** La primera versión de
+este arreglo metía el lock *dentro* de `ensure_clone`/`pull_rebase`/
+`commit_and_push`, y no bastó: entre que un módulo de fichero
+(`objectives.py` y el resto) escribe el YAML en disco y llama a
+`commit_and_push`, el directorio de trabajo queda con cambios sin
+commitear -fuera de cualquier lock interno de aquí, porque ese paso vive
+en otro módulo-. Un `pull --rebase` concurrente de **otra** petición -una
+simple `GET` a otra pestaña de `/perfil`- se encuentra esos cambios sin
+confirmar y falla con "cannot pull with rebase: You have unstaged
+changes", que es justo lo que apareció al ajustarlo por primera vez. Con
+el lock sostenido por el router desde `_sync` hasta el `commit_and_push`
+-abarcando también la escritura en disco de en medio-, ninguna otra
+petición puede ver el directorio a medias. No es una pérdida de
+paralelismo real: las peticiones al perfil ya compartían un único
+directorio de trabajo y nunca pudieron ejecutarse a la vez de forma
+segura; lo que gana este mecanismo es que mientras esperan no bloquean
+nada que no sea perfil.
 """
 
 from __future__ import annotations
 
+import asyncio
 import os
 import subprocess
 from collections.abc import Sequence
@@ -85,6 +119,21 @@ class GitRemote:
         return {"GIT_SSH_COMMAND": " ".join(command)}
 
 
+# Un lock por directorio de trabajo, no uno global ni ninguno -ver el
+# docstring del módulo-. El llamador lo sostiene con `async with
+# lock_for(root):` durante toda la petición; por ruta y no global para que
+# dos clones *distintos* -como los de `test_data_repo_write_git_ops.py`,
+# cada uno en su propio `tmp_path`- no tengan motivo para esperarse entre sí.
+_locks: dict[Path, asyncio.Lock] = {}
+
+
+def lock_for(path: Path) -> asyncio.Lock:
+    lock = _locks.get(path)
+    if lock is None:
+        lock = _locks[path] = asyncio.Lock()
+    return lock
+
+
 def _run(
     path: Path | None, *args: str, env: dict[str, str] | None = None
 ) -> subprocess.CompletedProcess[str]:
@@ -96,8 +145,7 @@ def _run(
     return subprocess.run(command, capture_output=True, text=True, env=full_env)
 
 
-def ensure_clone(path: Path, remote: GitRemote) -> None:
-    """Clona una vez. Si `path` ya es un repositorio git, no hace nada."""
+def _ensure_clone_sync(path: Path, remote: GitRemote) -> None:
     if (path / ".git").is_dir():
         return
     path.mkdir(parents=True, exist_ok=True)
@@ -116,16 +164,18 @@ def ensure_clone(path: Path, remote: GitRemote) -> None:
         raise GitOpsError(f"no se pudo clonar «{remote.url}»: {result.stderr}")
 
 
-def pull_rebase(
+async def ensure_clone(path: Path, remote: GitRemote) -> None:
+    """Clona una vez. Si `path` ya es un repositorio git, no hace nada.
+
+    Sin lock propio: el llamador ya sostiene `lock_for(path)` durante
+    toda la petición (ver el docstring del módulo).
+    """
+    await asyncio.to_thread(_ensure_clone_sync, path, remote)
+
+
+def _pull_rebase_sync(
     path: Path, remote: GitRemote, *, author_name: str, author_email: str
 ) -> None:
-    """`git pull --rebase`. Si choca, aborta el rebase y no fuerza nada.
-
-    Rebasar reescribe el committer de cada commit que se reproduce encima
-    -aunque no toque su contenido ni a su autoría original-, así que hace
-    falta una identidad aquí igual que en `commit_and_push`, o git se niega
-    con «please tell me who you are» en cuanto haya algo que reproducir.
-    """
     result = _run(
         path,
         "-c",
@@ -145,7 +195,77 @@ def pull_rebase(
         )
 
 
-def commit_and_push(
+async def pull_rebase(
+    path: Path, remote: GitRemote, *, author_name: str, author_email: str
+) -> None:
+    """`git pull --rebase`. Si choca, aborta el rebase y no fuerza nada.
+
+    Rebasar reescribe el committer de cada commit que se reproduce encima
+    -aunque no toque su contenido ni a su autoría original-, así que hace
+    falta una identidad aquí igual que en `commit_and_push`, o git se niega
+    con «please tell me who you are» en cuanto haya algo que reproducir.
+    Sin lock propio: el llamador ya sostiene `lock_for(path)` durante
+    toda la petición (ver el docstring del módulo).
+    """
+    await asyncio.to_thread(
+        _pull_rebase_sync,
+        path,
+        remote,
+        author_name=author_name,
+        author_email=author_email,
+    )
+
+
+def _commit_and_push_sync(
+    path: Path,
+    remote: GitRemote,
+    files: Sequence[str],
+    *,
+    message: str,
+    author_name: str,
+    author_email: str,
+) -> str:
+    add = _run(path, "add", "--", *files)
+    if add.returncode != 0:
+        raise GitOpsError(f"no se pudo preparar el commit: {add.stderr}")
+
+    staged = _run(path, "diff", "--cached", "--quiet", "--", *files)
+    if staged.returncode == 0:
+        sha = _run(path, "rev-parse", "HEAD")
+        return sha.stdout.strip()
+
+    commit = _run(
+        path,
+        "-c",
+        f"user.name={author_name}",
+        "-c",
+        f"user.email={author_email}",
+        "commit",
+        "-m",
+        message,
+    )
+    if commit.returncode != 0:
+        raise GitOpsError(f"no se pudo commitear: {commit.stderr}")
+
+    push = _run(path, "push", "origin", f"HEAD:{remote.branch}", env=remote.env())
+    if push.returncode != 0:
+        # Reintento en el mismo hilo, no una vuelta al event loop: es el
+        # mismo caso de carrera que ya describe el docstring de
+        # `commit_and_push`, y aquí abajo todo sigue siendo síncrono.
+        _pull_rebase_sync(
+            path, remote, author_name=author_name, author_email=author_email
+        )
+        push = _run(path, "push", "origin", f"HEAD:{remote.branch}", env=remote.env())
+        if push.returncode != 0:
+            raise GitConflictError(
+                f"conflicto al empujar a «{remote.branch}»", detail=push.stderr
+            )
+
+    sha = _run(path, "rev-parse", "HEAD")
+    return sha.stdout.strip()
+
+
+async def commit_and_push(
     path: Path,
     remote: GitRemote,
     files: Sequence[str],
@@ -174,37 +294,16 @@ def commit_and_push(
 
     Devuelve el sha del commit -el nuevo, o el que ya había si no hizo
     falta ninguno-.
+
+    Sin lock propio: el llamador ya sostiene `lock_for(path)` durante
+    toda la petición (ver el docstring del módulo).
     """
-    add = _run(path, "add", "--", *files)
-    if add.returncode != 0:
-        raise GitOpsError(f"no se pudo preparar el commit: {add.stderr}")
-
-    staged = _run(path, "diff", "--cached", "--quiet", "--", *files)
-    if staged.returncode == 0:
-        sha = _run(path, "rev-parse", "HEAD")
-        return sha.stdout.strip()
-
-    commit = _run(
+    return await asyncio.to_thread(
+        _commit_and_push_sync,
         path,
-        "-c",
-        f"user.name={author_name}",
-        "-c",
-        f"user.email={author_email}",
-        "commit",
-        "-m",
-        message,
+        remote,
+        files,
+        message=message,
+        author_name=author_name,
+        author_email=author_email,
     )
-    if commit.returncode != 0:
-        raise GitOpsError(f"no se pudo commitear: {commit.stderr}")
-
-    push = _run(path, "push", "origin", f"HEAD:{remote.branch}", env=remote.env())
-    if push.returncode != 0:
-        pull_rebase(path, remote, author_name=author_name, author_email=author_email)
-        push = _run(path, "push", "origin", f"HEAD:{remote.branch}", env=remote.env())
-        if push.returncode != 0:
-            raise GitConflictError(
-                f"conflicto al empujar a «{remote.branch}»", detail=push.stderr
-            )
-
-    sha = _run(path, "rev-parse", "HEAD")
-    return sha.stdout.strip()

@@ -1012,3 +1012,99 @@ principio.
 Pendiente de aprovisionar a mano en producción antes de llevar Fase 2
 entera a producción: la deploy key de lectura-escritura
 (`docs/deployment.md` §10), sin cambios desde M0.
+
+## 2026-09-13 — Corrección: el `event loop` bloqueado ocultaba una carrera real de git
+
+Primera vez que se toca `git_ops.py` desde que M0 lo cerró. No lo motivó
+una rebanada de Fase 2, sino investigar por qué la CI de Fase 3 llevaba
+dos sesiones en rojo en `perfil.spec.ts` sin que nadie lo hubiera notado
+-detalle de esa investigación en
+`docs/decisions/fase-3-pipeline-y-seguimiento.md`-.
+
+### El hallazgo: dos bugs distintos, uno escondiendo al otro
+
+Las tres funciones públicas de `git_ops.py` (`ensure_clone`,
+`pull_rebase`, `commit_and_push`) eran síncronas y `subprocess.run`
+bloquea de verdad; las veinticuatro rutas de `router.py` que las llaman
+son `async def` de FastAPI. Sin `asyncio.to_thread`, una sola petición
+haciendo `pull --rebase` congelaba el *event loop* entero -no solo esa
+petición, cualquier otra que llegara mientras tanto, con perfil o sin
+él-. Con ocho ficheros editables y `/perfil` consultando los ocho al
+cargar, eso encolaba peticiones el tiempo suficiente para que la CI
+-más lenta por operación que un portátil- empezara a superar los
+timeouts de Playwright, sin que ningún `git` hubiera chocado nunca: cero
+errores de git en los logs, solo timeouts.
+
+El arreglo obvio -envolver las tres funciones en `asyncio.to_thread`-
+quitó el bloqueo pero destapó el bug de verdad: con las peticiones
+corriendo de verdad en paralelo, `/perfil` empezó a fallar el 100% de
+las veces con `fatal: Cannot rebase onto multiple branches` -dos
+`fetch`/`rebase` entrelazando su `FETCH_HEAD` sobre el mismo `.git`-. El
+bloqueo accidental del *event loop* llevaba desde M0 sirviendo de
+exclusión mutua de facto sobre el único directorio de trabajo
+compartido; quitarlo sin poner nada en su lugar cambiaba un problema de
+rendimiento por uno de corrupción.
+
+Un primer lock por directorio (`git_ops.lock_for`), sostenido solo
+*dentro* de cada una de las tres funciones, tampoco bastó: entre que un
+módulo de fichero (`objectives.py` y el resto) escribe el YAML en disco
+y se llama a `commit_and_push`, el directorio queda con cambios sin
+commitear -ese paso vive en otro módulo, fuera de cualquier lock de
+`git_ops.py`-. Un `pull --rebase` concurrente de otra pestaña se
+encontraba esos cambios a medias y fallaba con "cannot pull with
+rebase: You have unstaged changes". Mismo tipo de bug, ventana más
+pequeña.
+
+### La decisión: el lock lo sostiene el router, no `git_ops.py`
+
+`lock_for(path)` es público; `router.py` lo sostiene con `async with
+git_ops.lock_for(root):` desde el `_sync` (clonar + `pull --rebase`)
+hasta el `commit_and_push`, envolviendo también la escritura en disco de
+en medio. Las tres funciones de `git_ops.py` ya no llevan lock propio
+-hacerlo habría bloqueado al llamador contra sí mismo, porque
+`asyncio.Lock` no es reentrante-. Por directorio y no global: dos clones
+*distintos* -los de `test_data_repo_write_git_ops.py`, cada uno en su
+propio `tmp_path`- no tienen motivo para esperarse entre sí.
+
+No es una pérdida de paralelismo real: las peticiones al perfil ya
+compartían un único directorio de trabajo y nunca pudieron ejecutarse a
+la vez de forma segura; lo que cambia es que mientras una espera su
+turno, ya no bloquea nada que no sea perfil -la API entera,
+`/api/offers/*` incluido, seguía sirviendo peticiones normalmente
+durante todo este episodio, comprobado en los logs-.
+
+### Lo que este arreglo no toca, a propósito
+
+Serializar el acceso al directorio de trabajo no es control de
+concurrencia optimista sobre el *contenido*. Dos peticiones que editan
+el **mismo campo** sin haberse visto siguen resolviéndose como ya
+describía M0: "gana quien confirma último, silenciosamente". Se
+confirmó de nuevo aquí, con el propio historial de git, al serializar
+`perfil.spec.ts` -ver más abajo-: dos tests tocando el mismo `bullet_id`
+en paralelo hacían que uno sobrescribiera silenciosamente el texto que
+el otro acababa de confirmar, sin ningún error. Sigue siendo una
+decisión de UX pendiente y no un bug de esta corrección -exactamente lo
+que M0 ya dejó anotado-.
+
+### El harness
+
+`test_data_repo_write_git_ops.py` gana
+`test_concurrent_requests_on_the_same_clone_do_not_corrupt_git`: diez
+peticiones de verdad en paralelo (`asyncio.gather`) contra el mismo
+clon, cada una a su propio fichero -sin ninguna carrera de contenido de
+por medio, que es el problema aparte de arriba-, comprobando que las
+diez entran sin que `git` se rompa.
+
+`e2e/tests/perfil.spec.ts` pasa a `test.describe.configure({ mode:
+"serial" })`: sus tests comparten el mismo clon de escritura -no hay un
+Postgres que aislar por test- y varios editan la misma fila de fixture;
+sin control de concurrencia optimista, dejarlos en paralelo expone la
+carrera de contenido de arriba como flakiness de test. Cuesta unos
+segundos más de principio a fin; nada del mecanismo de escritura cambia
+por esto.
+
+Verificado en esta máquina el 2026-09-13: `make check-api` limpio (485
+tests, uno nuevo), `make e2e` con las 29 pruebas en verde en dos
+ejecuciones seguidas -antes fallaban 10-11 de 29, siempre en
+`perfil.spec.ts`/`shell.spec.ts`-, y de más de un minuto a ~16-17
+segundos de principio a fin.

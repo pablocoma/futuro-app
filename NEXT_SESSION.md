@@ -1,6 +1,6 @@
 # Traspaso a la siguiente sesión
 
-Última actualización: 2026-09-09.
+Última actualización: 2026-09-13.
 
 Este archivo es **solo el estado operativo actual y el troceo de la fase en
 curso**: se reescribe en cada cierre de rebanada, no acumula historial. El
@@ -25,7 +25,11 @@ sospecha de que están desactualizados.
 - **Fase 2** (perfil editable: los ocho YAML del repositorio privado) —
   cerrada en código el 2026-09-08. `docs/decisions/fase-2-perfil-editable.md`.
   **Pendiente de aprovisionar a mano en producción**: deploy key de
-  lectura-escritura, `docs/deployment.md` §10.
+  lectura-escritura, `docs/deployment.md` §10. Corrección el 2026-09-13 en
+  `git_ops.py`: el bloqueo del *event loop* por un `subprocess.run` síncrono
+  escondía una carrera real de git bajo carga concurrente -`/perfil` fallaba
+  el 100% de las veces en CI y en local con varias pestañas a la vez-; ver
+  la sección fechada de ese día en el mismo fichero de decisiones.
 - **Fase 3** (pipeline y seguimiento) — en curso desde 2026-09-08. Troceo
   y siguiente objetivo abajo.
   `docs/decisions/fase-3-pipeline-y-seguimiento.md` —lee solo su sección

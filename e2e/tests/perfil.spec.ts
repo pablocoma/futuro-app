@@ -10,7 +10,19 @@ import { expect, test } from "@playwright/test";
  * real. El estado se acumula entre ejecuciones -igual que las ofertas en
  * Postgres en el resto de la suite-, así que la declaración lleva una
  * marca única para no depender de lo que dejó una ejecución anterior.
+ *
+ * Serie y no en paralelo, a propósito: todos los tests de este fichero
+ * comparten el mismo clon de escritura -no hay una `Postgres` que aislar
+ * por test-, y algunos editan el mismo `bullet_id`/`project_id` de las
+ * fixtures. El mecanismo no tiene control de concurrencia optimista -"gana
+ * quien confirma último, silenciosamente", decisión consciente de Fase 2
+ * M0, ver `docs/decisions/fase-2-perfil-editable.md`-, así que dos de
+ * estos tests en paralelo pueden pisarse la escritura sin que ninguno vea
+ * un error: uno sobrescribe en silencio lo que el otro acababa de
+ * confirmar. Serializar este fichero cuesta unos segundos y evita
+ * exactamente ese caso, sin tocar el mecanismo de escritura en sí.
  */
+test.describe.configure({ mode: "serial" });
 
 test("editar el objetivo, ver el diff sin escribir, y confirmar lo escribe y empuja", async ({
   page,
