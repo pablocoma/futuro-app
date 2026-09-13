@@ -142,6 +142,15 @@ jobs:
       - name: Levantar el stack
         run: |
           cp .env.example .env
+          # `docker compose up` a mano, no `make up`: mismo stack, pero sin
+          # perder el `--wait-timeout 300` que ya está ajustado para el clon
+          # en frío de este runner. `make seed-data-repo-write` sí hay que
+          # llamarlo aparte -es lo que `make up` encadena y esto no-: sin él
+          # no existe `.dev-data/repo-write-remote.git`, el bind mount de
+          # `docker-compose.override.yml` monta un directorio vacío, y
+          # `/api/profile/*` responde 503 "el mecanismo de escritura del
+          # perfil no está configurado" en toda la suite de `perfil.spec.ts`.
+          make seed-data-repo-write
           docker compose up --build -d --wait --wait-timeout 300
           # Igual que en el deploy: el contenedor no migra al arrancar, se
           # migra como un paso aparte. Sin esto no hay tablas y la ingesta
