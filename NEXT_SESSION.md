@@ -26,10 +26,14 @@ sospecha de que están desactualizados.
   cerrada en código el 2026-09-08. `docs/decisions/fase-2-perfil-editable.md`.
   **Pendiente de aprovisionar a mano en producción**: deploy key de
   lectura-escritura, `docs/deployment.md` §10. Corrección el 2026-09-13 en
-  `git_ops.py`: el bloqueo del *event loop* por un `subprocess.run` síncrono
-  escondía una carrera real de git bajo carga concurrente -`/perfil` fallaba
-  el 100% de las veces en CI y en local con varias pestañas a la vez-; ver
-  la sección fechada de ese día en el mismo fichero de decisiones.
+  `git_ops.py`, **confirmada y cerrada**: el bloqueo del *event loop* por
+  un `subprocess.run` síncrono escondía una carrera real de git bajo carga
+  concurrente -`/perfil` fallaba el 100% de las veces en CI y en local con
+  varias pestañas a la vez-; verificado en esta máquina y contra dos
+  ejecuciones reales de la CI de GitHub Actions, cero errores de git en
+  ambas. Ver la sección fechada de ese día en el mismo fichero de
+  decisiones. **Al investigarlo salió un problema distinto y sin
+  resolver, ver cabos sueltos abajo.**
 - **Fase 3** (pipeline y seguimiento) — en curso desde 2026-09-08. Troceo
   y siguiente objetivo abajo.
   `docs/decisions/fase-3-pipeline-y-seguimiento.md` —lee solo su sección
@@ -45,8 +49,24 @@ tag anterior si falla. `main` está protegida (PR obligatorio, checks de
 `ci.yml`, historial lineal). Valores concretos (IPs, secretos, tokens) en
 `Futuro/docs/INFRASTRUCTURE.md`, nunca aquí.
 
-**Cabos sueltos, ninguno bloqueante:**
+**Cabos sueltos:**
 
+- **Bloqueante para un PR limpio de `dev` a `main` -no para seguir
+  trabajando en `dev`-: el check `e2e` de `ci.yml` no puede pasar
+  `perfil.spec.ts` en GitHub Actions.** Encontrado el 2026-09-13
+  investigando la corrección de arriba: `.github/workflows/ci.yml`
+  levanta el stack a mano (`cp .env.example .env` → `docker compose up`
+  → `alembic upgrade head`) pero **nunca llama a
+  `make seed-data-repo-write`**, que es el único sitio que siembra el
+  remoto bare que `DATA_REPO_WRITE_REMOTE` espera. Sin él,
+  `/api/profile/*` responde `503` en cualquier ejecución de la CI -no en
+  esta máquina, donde `make up` sí encadena ese paso-, así que `/perfil`
+  nunca enseña el formulario real y todos sus tests fallan. Detalle
+  completo en `docs/decisions/fase-2-perfil-editable.md`, sección del
+  2026-09-13. Arreglo probable: añadir el equivalente de
+  `make seed-data-repo-write` (o llamar a `make up` directamente) al paso
+  "Levantar el stack" de `ci.yml` -sin investigarlo más a fondo todavía,
+  es la primera hipótesis razonable, no una solución confirmada-.
 - Sin `pg_dump` de producción todavía (`ARCHITECTURE.md` §12 lo pide
   diario, cifrado, 30 días de retención).
 - Aviso por Telegram del resultado del deploy: pendiente hasta la

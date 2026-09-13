@@ -1109,26 +1109,40 @@ ejecuciones seguidas -antes fallaban 10-11 de 29, siempre en
 `perfil.spec.ts`/`shell.spec.ts`-, y de más de un minuto a ~16-17
 segundos de principio a fin.
 
-### Un último hallazgo, ya en CI real y no solo en esta máquina
+### Un último hallazgo, ya en CI real y no solo en esta máquina -y una hipótesis descartada
 
 El primer push con lo de arriba seguía en rojo en `e2e`, pero de forma
 mucho más leve -2 de 29, no 10-11- y sin un solo error de git en los
 logs: `expect(locator).toBeVisible()` fallando a los 5000ms, siempre en
-`perfil.spec.ts`/`shell.spec.ts`, siempre al principio de la tanda. En
-esta máquina nunca se vio porque `.dev-data/repo-write` ya llevaba toda
-la sesión clonado -cada verificación de arriba reutilizó ese mismo clon
-caliente-; en una CI de verdad el directorio no existe hasta la primera
-petición real a `/perfil`, y esa primera petición hace un `git clone` de
-verdad, no un `pull`. Con dos ficheros de test distintos -`perfil.spec.ts`
-y `shell.spec.ts`- pudiendo pedir `/perfil` casi a la vez nada más
-arrancar el stack, y con el lock nuevo obligando al segundo a esperar al
-primero entero, ese arranque en frío por sí solo puede acercarse a los
-5000ms por defecto de Playwright para `expect`.
+`perfil.spec.ts`/`shell.spec.ts`, siempre al principio de la tanda.
+Primera hipótesis, descartada después: que fuera el arranque en frío del
+primer `git clone` real -en esta máquina nunca se vio porque
+`.dev-data/repo-write` llevaba toda la sesión ya clonado-, así que se
+ensanchó `expect.timeout` a 15s solo en CI (`playwright.config.ts`).
 
-No es el bug de esta sección -no hay ninguna corrupción de git de por
-medio, solo un margen de tiempo demasiado ajustado para una operación que
-en CI cuesta más que en un portátil-. Corregido ensanchando el timeout de
-`expect` a 15s **solo en CI** (`playwright.config.ts`): en local el clon
-ya está caliente entre ejecuciones y fallar rápido ahí sigue siendo más
-útil al iterar. Verificado contra la CI real de GitHub Actions -no solo
-en esta máquina- tras el push.
+**La hipótesis era incorrecta.** Con el timeout a 15s, la CI siguió
+fallando exactamente igual -mismos dos tests, mismo "element(s) not
+found"-, lo que ya apuntaba a que no era una cuestión de margen. Revisando
+`docker compose logs` de esa ejecución: **todas** las rutas
+`/api/profile/*` devolvían `503 "el mecanismo de escritura del perfil no
+está configurado"` -el chequeo explícito de `_configured()`, anterior a
+cualquier operación de git-, y el worker fallaba su cron con
+`relation "job_runs" does not exist`. `/perfil` nunca llegó a enseñar el
+formulario real en ningún momento de esa ejecución: no era una carrera ni
+un timeout, era que el mecanismo entero no estaba activo.
+
+Causa: `.github/workflows/ci.yml` no reproduce `make up`. Levanta el stack
+a mano (`cp .env.example .env` → `docker compose up` →
+`alembic upgrade head`) pero **nunca llama a `make seed-data-repo-write`**,
+que es el único sitio donde se siembra el remoto bare
+(`.dev-data/repo-write-remote.git`) que `DATA_REPO_WRITE_REMOTE` espera
+encontrar. En esta máquina nunca se vio porque `make up` sí encadena ese
+paso. `expect.timeout` a 15s en CI se queda -no sobra, y no hace daño-,
+pero no es la corrección de este hallazgo.
+
+**Esto queda sin resolver y fuera del alcance de esta sesión**: es un
+problema de `ci.yml`, no de `git_ops.py` ni de la concurrencia que motivó
+toda esta entrada. Mientras no se corrija, `perfil.spec.ts` no puede pasar
+de verdad en GitHub Actions -sí en esta máquina, con `make up`-, y el
+check `e2e` seguirá en rojo para cualquier PR de `dev` a `main`. Anotado
+como siguiente paso en `NEXT_SESSION.md`.
