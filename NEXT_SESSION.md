@@ -100,18 +100,46 @@ Pipeline real que describe `docs/APP_SCREENS.md` (repositorio privado)
 §Pipeline, en su vista de tabla densa (mapa y kanban son las rebanadas 3
 y 4, no esta).
 
-Antes de proponer diseño, investigar:
+**Investigación ya hecha, diseño concreto propuesto a Pablo el
+2026-09-13, pendiente de su visto bueno para empezar a escribir código:**
 
-- Qué dice exactamente esa sección sobre la tabla densa (ordenable y
-  filtrable) y sobre el selector que algún día alternará las tres
-  vistas —¿se construye ya aunque las otras dos no existan todavía?—.
-- Qué de lo necesario para filtrar/ordenar ya expone `GET /api/offers`
-  (`status` desde la rebanada 1, `posting_status`) y qué falta
-  (`value_score`/`probability_band`/`portfolio_bucket` de
-  `offer_assessments`, de Fase 1 M2).
-- Si conviene mantener la ruta `/ofertas` o moverla, dado que
-  `/ofertas/[id]` sigue siendo la pantalla de detalle sin cambios
-  previstos en esta rebanada.
+Decidido con Pablo esa misma sesión: sin selector de vistas todavía
+(rebanada 3 lo trae con la primera vista alternativa de verdad); sin
+paginación por cursor para esta vista (se quita `before`, todo cabe en
+el límite actual de 100 filas, ordenado/filtrado en la propia consulta
+SQL); sin buscador de texto libre (solo filtros estructurados); las
+ofertas sin puntuar van siempre al final del orden por `value_score`,
+sea cual sea el sentido (`NULLS LAST`); se añade `assessment_status` a
+la fila además de los tres campos de `offer_assessments` -si no, un
+`value_score` nulo es ambiguo entre «sin puntuar», «en cola» y «falló»-.
 
-Proponer el diseño concreto y esperar el visto bueno antes de escribir
-código.
+- **Backend:**
+  - `assessment/repository.py`: nuevo `current_assessments_for(session,
+    extraction_ids)` — mismo patrón `DISTINCT ON` que
+    `offers_repo.current_extractions_for`/`pipeline_repo.current_statuses_for`.
+  - `offers/views.py::OfferSummaryView`: añade `value_score`,
+    `probability_band`, `portfolio_bucket`, `assessment_status` (opcionales,
+    `None` mientras no haya assessment).
+  - `offers/router.py::list_offers`: añade query params `status`,
+    `posting_status`, `portfolio_bucket` (filtros) y `sort`/`order`
+    (`captured_at`/`value_score`/`title`/`company`). Un `LEFT JOIN` a
+    `offer_assessments` cubre orden y filtro en una sola consulta.
+- **Frontend:**
+  - `/ofertas/page.tsx` pasa de lista plana a tabla densa: puesto/empresa,
+    estado de candidatura, `value_score` (número grande, sin escala —
+    micro-decisión ya establecida), probabilidad, cartera, estado del
+    anuncio, capturada.
+  - Orden y filtro por `searchParams` (patrón nuevo en este repo:
+    cabeceras de columna como enlaces, sin JS de cliente) — sigue el
+    criterio de la app de server components sobre estado de cliente.
+  - Se promueve el componente `State` (etiqueta + subrayado de color),
+    hoy sin exportar dentro de `ofertas/[id]/page.tsx`, a
+    `components/State.tsx` compartido.
+  - `/ofertas/[id]` no cambia. La ruta `/ofertas` se queda donde está
+    (`Shell.tsx` ya la trata como «Pipeline»).
+- **Tests:** extender `test_offers_api.py` (sort/filter/campos nuevos) y
+  revisar `e2e/tests/pipeline_status.spec.ts` -asume hoy un listado plano
+  en `/ofertas`, puede necesitar ajuste si el marcado cambia lo bastante.
+
+Fuera de esta rebanada a propósito: selector de vistas, búsqueda de texto
+libre, mapa y kanban.
