@@ -1108,3 +1108,27 @@ tests, uno nuevo), `make e2e` con las 29 pruebas en verde en dos
 ejecuciones seguidas -antes fallaban 10-11 de 29, siempre en
 `perfil.spec.ts`/`shell.spec.ts`-, y de más de un minuto a ~16-17
 segundos de principio a fin.
+
+### Un último hallazgo, ya en CI real y no solo en esta máquina
+
+El primer push con lo de arriba seguía en rojo en `e2e`, pero de forma
+mucho más leve -2 de 29, no 10-11- y sin un solo error de git en los
+logs: `expect(locator).toBeVisible()` fallando a los 5000ms, siempre en
+`perfil.spec.ts`/`shell.spec.ts`, siempre al principio de la tanda. En
+esta máquina nunca se vio porque `.dev-data/repo-write` ya llevaba toda
+la sesión clonado -cada verificación de arriba reutilizó ese mismo clon
+caliente-; en una CI de verdad el directorio no existe hasta la primera
+petición real a `/perfil`, y esa primera petición hace un `git clone` de
+verdad, no un `pull`. Con dos ficheros de test distintos -`perfil.spec.ts`
+y `shell.spec.ts`- pudiendo pedir `/perfil` casi a la vez nada más
+arrancar el stack, y con el lock nuevo obligando al segundo a esperar al
+primero entero, ese arranque en frío por sí solo puede acercarse a los
+5000ms por defecto de Playwright para `expect`.
+
+No es el bug de esta sección -no hay ninguna corrupción de git de por
+medio, solo un margen de tiempo demasiado ajustado para una operación que
+en CI cuesta más que en un portátil-. Corregido ensanchando el timeout de
+`expect` a 15s **solo en CI** (`playwright.config.ts`): en local el clon
+ya está caliente entre ejecuciones y fallar rápido ahí sigue siendo más
+útil al iterar. Verificado contra la CI real de GitHub Actions -no solo
+en esta máquina- tras el push.
