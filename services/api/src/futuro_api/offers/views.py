@@ -20,6 +20,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
+from futuro_api.data_repo import vocabularies as data_vocab
 from futuro_api.jobs import vocabularies as jobs_vocab
 from futuro_api.models import JobRun, OfferCapture, OfferExtraction
 from futuro_api.offers import schemas
@@ -151,6 +152,17 @@ class OfferSummaryView(BaseModel):
     # el vocabulario directamente en vez de heredarlo de un `OfferView` que
     # no sabe nada de candidaturas, mismo criterio que `jobs_vocab` arriba.
     status: ApplicationStatus
+    # Los tres del assessment vigente, para la tabla densa del Pipeline
+    # (Fase 3, rebanada 2). `assessment_status` reutiliza el mismo tipo que
+    # `extraction_status` -mismos cinco valores, mismo motivo- en vez de
+    # importar `AssessmentStatus` de `assessment.views`: la dirección de las
+    # dependencias es `assessment` → `offers`, y este módulo no puede
+    # invertirla. Sin él, un `value_score` nulo sería ambiguo entre «sin
+    # puntuar todavía», «en cola» y «la puntuación falló».
+    assessment_status: ExtractionStatus
+    value_score: str | None = None
+    probability_band: data_vocab.ProbabilityBand | None = None
+    portfolio_bucket: data_vocab.PortfolioBucket | None = None
 
 
 def readable(value: Any) -> Any:

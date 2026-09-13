@@ -23,6 +23,15 @@ def _ingest(client: TestClient, text: str = ADVERT, **extra: Any) -> Any:
     return client.post("/api/offers/ingest", json={"raw_text": text, **extra})
 
 
+OTRO_ANUNCIO = (
+    "Cooperativa del Valle busca Analista de Datos para el almacén de Teruel. "
+    "Trabajarás con el equipo de logística en los cuadros de mando de la "
+    "cadena de frío. Imprescindible SQL y hojas de cálculo. Se valora "
+    "experiencia con herramientas de visualización. Carné de conducir B. "
+    "Jornada completa y contrato indefinido, con dos días de teletrabajo."
+)
+
+
 def test_the_status_endpoint_is_closed_without_a_session() -> None:
     with client_with_queue(dev_auth_bypass=False) as (client, _):
         response = client.post(
@@ -74,6 +83,26 @@ def test_changing_status_is_reflected_in_the_detail_and_the_list(
 
     summary = next(o for o in client.get("/api/offers").json() if o["id"] == capture_id)
     assert summary["status"] == "submitted"
+
+
+def test_the_list_can_filter_by_pipeline_status(
+    api: tuple[TestClient, FakeQueue],
+) -> None:
+    client, _ = api
+    still_researching = _ingest(client).json()["capture_id"]
+    moved = _ingest(client, OTRO_ANUNCIO).json()["capture_id"]
+    client.post(f"/api/offers/{moved}/status", json={"status": "submitted"})
+
+    research_only = client.get("/api/offers", params={"status": "research"}).json()
+    assert [o["id"] for o in research_only] == [still_researching]
+
+    submitted_only = client.get("/api/offers", params={"status": "submitted"}).json()
+    assert [o["id"] for o in submitted_only] == [moved]
+
+
+def test_an_unknown_status_filter_is_a_422(api: tuple[TestClient, FakeQueue]) -> None:
+    client, _ = api
+    assert client.get("/api/offers", params={"status": "ghosted"}).status_code == 422
 
 
 def test_the_detail_carries_the_full_history_newest_first(

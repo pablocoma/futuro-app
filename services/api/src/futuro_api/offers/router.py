@@ -30,6 +30,7 @@ from futuro_api.applications import views as applications_views
 from futuro_api.assessment import repository as assessment_repo
 from futuro_api.assessment import views as assessment_views
 from futuro_api.config import Settings
+from futuro_api.data_repo import vocabularies as data_vocab
 from futuro_api.jobs import queue as job_queue
 from futuro_api.jobs import repository as jobs_repo
 from futuro_api.jobs import vocabularies as jobs_vocab
@@ -468,48 +469,64 @@ async def confirm_variant(
     return applications_views.application_view(application)
 
 
-@router.get("", summary="Lista las ofertas capturadas")
+@router.get("", summary="Lista las ofertas: la pantalla Pipeline")
 async def list_offers(
     session: SessionDep,
     limit: Annotated[int, Query(ge=1, le=MAX_PAGE)] = 50,
-    before: uuid.UUID | None = None,
+    status: ApplicationStatus | None = None,
+    posting_status: vocab.PostingStatus | None = None,
+    portfolio_bucket: data_vocab.PortfolioBucket | None = None,
+    sort: offers_repo.SortField = "captured_at",
+    order: offers_repo.SortOrder = "desc",
 ) -> list[views.OfferSummaryView]:
-    """Listado mínimo, de la más reciente a la más antigua.
+    """La tabla densa del Pipeline, filtrada y ordenada en la propia consulta.
 
-    Sin filtros ni orden configurable: eso es la pantalla Pipeline, que no
-    es esta rebanada. Existe para que la pantalla de una oferta siga siendo
-    alcanzable después de recargar el navegador.
+    Sin selector de vistas ni buscador de texto libre -rebanada 3 y en
+    adelante, no esta-, y sin paginación por cursor: con filtro y orden
+    configurables, cortar por `captured_at` en Python después de traer una
+    página fija dejaría de ser correcto en cuanto se ordene por otra
+    columna, así que el corte se hace en SQL con `limit`. El límite actual
+    de `MAX_PAGE` sigue siendo suficiente para no echarlo en falta.
     """
-    captures = await offers_repo.list_captures(session, limit=limit, before=before)
-    capture_ids = [capture.id for capture in captures]
-    extractions = await offers_repo.current_extractions_for(session, capture_ids)
-    runs = await jobs_repo.latest_runs_for(
+    rows = await offers_repo.list_offer_rows(
+        session,
+        limit=limit,
+        status=status,
+        posting_status=posting_status,
+        portfolio_bucket=portfolio_bucket,
+        sort=sort,
+        order=order,
+    )
+    capture_ids = [row.id for row in rows]
+    extraction_runs = await jobs_repo.latest_runs_for(
         session, capture_ids, kind=jobs_vocab.JobKind.OFFER_EXTRACTION
     )
-    statuses = await pipeline_repo.current_statuses_for(session, capture_ids)
+    assessment_runs = await jobs_repo.latest_runs_for(
+        session, capture_ids, kind=jobs_vocab.JobKind.OFFER_ASSESSMENT
+    )
 
-    summaries = []
-    for capture in captures:
-        extraction = extractions.get(capture.id)
-        company = None
-        if extraction is not None:
-            # El empleador final manda sobre quien publica: es la empresa
-            # para la que se trabajaría, que es lo que interesa de un
-            # vistazo.
-            named = extraction.employer_company or extraction.posting_company
-            company = named.name if named else None
-        summaries.append(
-            views.OfferSummaryView(
-                id=capture.id,
-                captured_at=capture.captured_at,
-                title=extraction.title if extraction else None,
-                company=company,
-                posting_status=extraction.posting_status if extraction else None,
-                extraction_status=views.status_of(runs.get(capture.id), extraction),
-                status=statuses.get(capture.id, DEFAULT_STATUS),
-            )
+    return [
+        views.OfferSummaryView(
+            id=row.id,
+            captured_at=row.captured_at,
+            title=row.title,
+            company=row.company,
+            posting_status=row.posting_status,
+            extraction_status=views.status_of(
+                extraction_runs.get(row.id), row.extraction_id
+            ),
+            status=row.status,
+            assessment_status=views.status_of(
+                assessment_runs.get(row.id), row.assessment_id
+            ),
+            value_score=(
+                format(row.value_score, "f") if row.value_score is not None else None
+            ),
+            probability_band=row.probability_band,
+            portfolio_bucket=row.portfolio_bucket,
         )
-    return summaries
+        for row in rows
+    ]
 
 
 class OfferDetail(views.OfferView):

@@ -250,20 +250,30 @@ async def test_a_capture_without_extractions_has_no_current_one(
 # ---------------------------------------------------------------------------
 
 
-async def test_captures_are_listed_newest_first_and_paginate(
+async def test_offers_are_listed_newest_first_by_default(
     session: AsyncSession,
 ) -> None:
-    """La paginación va por la captura ancla y no por desplazamiento.
-
-    Un `OFFSET` se descuadra en cuanto entra una oferta nueva mientras
-    alguien mira la segunda página: se repite o se salta una fila.
-    """
     first = await _capture(session, "Primer anuncio inventado, el más viejo.")
     second = await _capture(session, "Segundo anuncio inventado.")
     third = await _capture(session, "Tercer anuncio inventado, el más nuevo.")
 
-    listed = await repo.list_captures(session, limit=10)
-    assert [c.id for c in listed] == [third.id, second.id, first.id]
+    rows = await repo.list_offer_rows(session, limit=10)
+    assert [row.id for row in rows] == [third.id, second.id, first.id]
+    # Sin extracción todavía: no hay título, empresa ni assessment vigente.
+    assert rows[0].title is None
+    assert rows[0].company is None
+    assert rows[0].extraction_id is None
+    assert rows[0].assessment_id is None
+    assert rows[0].value_score is None
 
-    page = await repo.list_captures(session, limit=10, before=third.id)
-    assert [c.id for c in page] == [second.id, first.id]
+
+async def test_the_listing_respects_its_limit(session: AsyncSession) -> None:
+    for text in (
+        "Primer anuncio inventado, el más viejo.",
+        "Segundo anuncio inventado.",
+        "Tercer anuncio inventado, el más nuevo.",
+    ):
+        await _capture(session, text)
+
+    rows = await repo.list_offer_rows(session, limit=2)
+    assert len(rows) == 2

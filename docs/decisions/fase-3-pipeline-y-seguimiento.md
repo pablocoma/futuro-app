@@ -139,3 +139,97 @@ un test con `ref-${Date.now()}`.
 - `follow_up_at` y recordatorios (rebanada 6).
 - Mover el estado automáticamente al confirmar una variante.
 - Restringir qué transiciones son válidas.
+
+## 2026-09-13 — Rebanada 2, Pipeline: tabla densa
+
+Sustituye el listado plano de `/ofertas` (Fase 1 M1) por la vista de tabla
+densa de `docs/APP_SCREENS.md` (repositorio privado) §Pipeline. Diseño
+propuesto a Pablo y aprobado el mismo día -sin selector de vistas todavía
+(rebanada 3 lo trae con la primera vista alternativa de verdad), sin
+paginación por cursor, sin buscador de texto libre-.
+
+### Backend
+
+- `offers/router.py::list_offers` gana `status`, `posting_status`,
+  `portfolio_bucket` (filtros) y `sort`/`order` sobre `captured_at`,
+  `value_score`, `title`, `company`. `value_score` siempre manda las
+  ofertas sin puntuar al final -`NULLS LAST`-, sea cual sea el sentido:
+  un valor nulo no es "la peor nota", es "no hay nada que comparar
+  todavía".
+- `OfferSummaryView` añade `value_score`, `probability_band`,
+  `portfolio_bucket` y `assessment_status`. Este último viaja aparte y no
+  se infiere de `value_score`: un valor nulo es ambiguo entre «sin
+  puntuar», «en cola» y «falló», y sin `assessment_status` la pantalla no
+  podría distinguirlos. Reutiliza el tipo `ExtractionStatus` de
+  `offers/views.py` en vez de importar `AssessmentStatus` de
+  `assessment/views.py`: la dirección de las dependencias es
+  `assessment` → `offers`, y este módulo no puede invertirla.
+
+**Desviación deliberada sobre lo propuesto inicialmente.** La propuesta
+original preveía un `assessment_repo.current_assessments_for` -bulk
+`DISTINCT ON`, mismo patrón que `current_extractions_for`/
+`current_statuses_for`- combinado en Python con una `list_captures`
+paginada. Al escribir el código quedó claro que no encaja: quitar la
+paginación por cursor significa que el corte de la página ahora depende
+de filtro y orden configurables, así que **tiene que** hacerse en la
+propia consulta SQL -aplicar `LIMIT` en Python después de traer una
+página fija por `captured_at` deja de ser correcto en cuanto se ordena
+por otra columna-. La solución real es `offers/repository.py::
+list_offer_rows`: un único `SELECT` con tres subconsultas `DISTINCT ON`
+-extracción, assessment y estado vigentes, cada una con el mismo orden
+que su propio módulo ya usaba- unidas por `LEFT JOIN`, con filtro, orden
+y límite todos en la misma consulta. Como consecuencia, `current_assessments_for`
+nunca se llegó a escribir -no lo llama nadie-, y `list_captures`/
+`current_extractions_for` -que solo `list_offers` usaba- se borraron en
+vez de dejarlos muertos junto al código nuevo.
+
+### Frontend
+
+- `/ofertas/page.tsx`: tabla densa con las columnas puesto/empresa,
+  candidatura, valor, probabilidad, cartera, anuncio y capturada. Orden y
+  filtro viven en `searchParams` -cabeceras de columna y opciones de
+  filtro son enlaces normales, patrón nuevo en este repositorio: sigue el
+  criterio de la app de server components sobre estado de cliente, y
+  aquí no hace falta ni un componente cliente-.
+- Sin columna propia de "estado de extracción"/"estado de puntuación": no
+  están en la lista de columnas que se acordó con Pablo. En vez de una
+  columna más, la celda de puesto/empresa enseña el estado de extracción
+  cuando todavía no hay título, y la celda de valor enseña
+  `assessment_status` cuando `value_score` es nulo -es exactamente el
+  motivo por el que se añadió ese campo a la API-.
+- El componente `State` (etiqueta + subrayado de color), hasta ahora sin
+  exportar dentro de `ofertas/[id]/page.tsx`, se promueve a
+  `components/State.tsx` compartido, con la etiqueta ahora opcional: en
+  el `<dl>` del detalle la lleva, en una celda de tabla -donde la
+  cabecera ya dice qué es- no. De paso cambia sus `dt`/`dd` por
+  elementos genéricos, porque el segundo uso no vive dentro de un
+  `<dl>` y `dt`/`dd` sueltos ahí serían HTML inválido.
+- `/ofertas/[id]` no cambia de comportamiento, solo de dónde importa
+  `State`.
+
+### Verificado en esta máquina, 2026-09-13
+
+Backend: `uv run ruff check`/`ruff format --check`/`mypy` limpios, `uv run
+pytest -q` en verde -495 tests, con los nuevos cubriendo orden por
+`value_score` con `NULLS LAST` en los dos sentidos, filtro por
+`posting_status`/`portfolio_bucket`/`status`, los campos nuevos del
+listado, y un 422 en un `sort`/`order` inválido-, contra el Postgres real
+de `make up`. Frontend: `npm run typecheck`/`lint`/`test` limpios (19
+tests, 2 nuevos para la construcción de la query de `listOffers`), `npm
+run build` sin avisos.
+
+Verificado también contra el stack real (`docker compose up --build`, no
+solo `make check`): capturas de pantalla de `/ofertas` con datos
+sembrados por sesiones anteriores, filtros compuestos (candidatura +
+cartera a la vez) y su estado vacío, y clic real sobre la cabecera
+"Valor" comprobando que navega a `?sort=value_score&order=asc` y marca la
+columna activa. `make e2e` completo: las 18 pruebas que tocan
+`/ofertas`/`/ofertas/[id]`/shell pasan -incluida
+`pipeline_status.spec.ts` entera-; las 2 que fallan y las 9 que no llegan
+a correr son todas de `perfil.spec.ts` y de "Perfil es un destino real"
+en `shell.spec.ts`, por un 409 "conflicto al traer «dev»" al leer
+`/api/profile/objectives` -un conflicto de `git pull --rebase` en el
+clon de trabajo local de Fase 2, en `.dev-data/repo-write`, acumulado por
+sesiones anteriores en esta misma máquina-. No toca nada de esta
+rebanada -que no lee ni escribe ese repositorio- ni el código que cambió;
+es estado local de este `.dev-data`, no una regresión.

@@ -1,6 +1,6 @@
 # Traspaso a la siguiente sesión
 
-Última actualización: 2026-09-13.
+Última actualización: 2026-09-13 (rebanada 2 de Fase 3, cerrada).
 
 Este archivo es **solo el estado operativo actual y el troceo de la fase en
 curso**: se reescribe en cada cierre de rebanada, no acumula historial. El
@@ -85,61 +85,24 @@ tamaño. Ajustable si la realidad no encaja al llegar a una rebanada
 concreta.
 
 1. ~~Modelo de estados de candidatura~~ — **cerrada 2026-09-08.**
-2. **Pipeline: tabla densa** ← siguiente objetivo, ver abajo.
-3. Pipeline: mapa valor × probabilidad.
+2. ~~Pipeline: tabla densa~~ — **cerrada 2026-09-13.**
+3. **Pipeline: mapa valor × probabilidad** ← siguiente objetivo, ver abajo.
 4. Pipeline: kanban por etapa.
 5. Interacciones (registro manual por candidatura).
 6. Recordatorios (`follow_up_at`).
 7. Pantalla Hoy (cola de decisiones agrupada por tipo de pendiente).
 8. Bot de Telegram (probablemente dos sesiones: ingesta y avisos).
 
-### Siguiente objetivo: rebanada 2 — Pipeline, tabla densa
+### Siguiente objetivo: rebanada 3 — Pipeline, mapa valor × probabilidad
 
-Sustituir el listado plano de `/ofertas` (Fase 1 M1) por la pantalla
-Pipeline real que describe `docs/APP_SCREENS.md` (repositorio privado)
-§Pipeline, en su vista de tabla densa (mapa y kanban son las rebanadas 3
-y 4, no esta).
+`/ofertas` es ya la tabla densa (rebanada 2, cerrada el 2026-09-13,
+`docs/decisions/fase-3-pipeline-y-seguimiento.md`). Esta rebanada trae la
+segunda vista de `docs/APP_SCREENS.md` (repositorio privado) §Pipeline:
+el mapa valor × probabilidad, y con ella el primer selector de vistas
+real (hasta ahora `/ofertas` solo tenía una).
 
-**Investigación ya hecha, diseño concreto propuesto a Pablo el
-2026-09-13, pendiente de su visto bueno para empezar a escribir código:**
-
-Decidido con Pablo esa misma sesión: sin selector de vistas todavía
-(rebanada 3 lo trae con la primera vista alternativa de verdad); sin
-paginación por cursor para esta vista (se quita `before`, todo cabe en
-el límite actual de 100 filas, ordenado/filtrado en la propia consulta
-SQL); sin buscador de texto libre (solo filtros estructurados); las
-ofertas sin puntuar van siempre al final del orden por `value_score`,
-sea cual sea el sentido (`NULLS LAST`); se añade `assessment_status` a
-la fila además de los tres campos de `offer_assessments` -si no, un
-`value_score` nulo es ambiguo entre «sin puntuar», «en cola» y «falló»-.
-
-- **Backend:**
-  - `assessment/repository.py`: nuevo `current_assessments_for(session,
-    extraction_ids)` — mismo patrón `DISTINCT ON` que
-    `offers_repo.current_extractions_for`/`pipeline_repo.current_statuses_for`.
-  - `offers/views.py::OfferSummaryView`: añade `value_score`,
-    `probability_band`, `portfolio_bucket`, `assessment_status` (opcionales,
-    `None` mientras no haya assessment).
-  - `offers/router.py::list_offers`: añade query params `status`,
-    `posting_status`, `portfolio_bucket` (filtros) y `sort`/`order`
-    (`captured_at`/`value_score`/`title`/`company`). Un `LEFT JOIN` a
-    `offer_assessments` cubre orden y filtro en una sola consulta.
-- **Frontend:**
-  - `/ofertas/page.tsx` pasa de lista plana a tabla densa: puesto/empresa,
-    estado de candidatura, `value_score` (número grande, sin escala —
-    micro-decisión ya establecida), probabilidad, cartera, estado del
-    anuncio, capturada.
-  - Orden y filtro por `searchParams` (patrón nuevo en este repo:
-    cabeceras de columna como enlaces, sin JS de cliente) — sigue el
-    criterio de la app de server components sobre estado de cliente.
-  - Se promueve el componente `State` (etiqueta + subrayado de color),
-    hoy sin exportar dentro de `ofertas/[id]/page.tsx`, a
-    `components/State.tsx` compartido.
-  - `/ofertas/[id]` no cambia. La ruta `/ofertas` se queda donde está
-    (`Shell.tsx` ya la trata como «Pipeline»).
-- **Tests:** extender `test_offers_api.py` (sort/filter/campos nuevos) y
-  revisar `e2e/tests/pipeline_status.spec.ts` -asume hoy un listado plano
-  en `/ofertas`, puede necesitar ajuste si el marcado cambia lo bastante.
-
-Fuera de esta rebanada a propósito: selector de vistas, búsqueda de texto
-libre, mapa y kanban.
+Antes de proponer diseño, investigar: cómo describe `APP_SCREENS.md` el
+mapa exactamente (ejes, qué representa cada punto, qué pasa al hacer
+clic); si el selector de vistas vive en la URL igual que el filtro/orden
+de la tabla, o es otra cosa; y si hace falta algo del backend que
+`list_offer_rows` no dé ya.

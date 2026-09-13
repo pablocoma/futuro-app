@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from futuro_api.assessment import calls as assessment_calls
+from futuro_api.data_repo import vocabularies as data_vocab
 from futuro_api.jobs import tasks
 from futuro_api.jobs.tasks import extract_offer
 from futuro_api.llm.stub import StubClient
@@ -451,6 +452,122 @@ async def _extracted_and_scored(
     queued = client.post(f"/api/offers/{ingested['capture_id']}/assess").json()
     await _score(sessions, queued["job_run_id"])
     return str(ingested["capture_id"])
+
+
+# ---------------------------------------------------------------------------
+# El listado: filtro y orden de la tabla densa (Fase 3, rebanada 2)
+# ---------------------------------------------------------------------------
+
+
+async def test_the_list_carries_the_assessment_once_scored(
+    api: tuple[TestClient, FakeQueue],
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    """El listado y el detalle enseñan el mismo assessment vigente."""
+    client, _ = api
+    capture_id = await _extracted_and_scored(client, sessions)
+
+    summary = next(o for o in client.get("/api/offers").json() if o["id"] == capture_id)
+    detail = client.get(f"/api/offers/{capture_id}").json()["assessment"]
+
+    assert summary["assessment_status"] == "succeeded"
+    assert summary["value_score"] == detail["value_score"]
+    assert summary["probability_band"] == detail["probability_band"]
+    assert summary["portfolio_bucket"] == detail["portfolio_bucket"]
+
+
+async def test_an_unscored_offer_reports_none_and_no_score(
+    api: tuple[TestClient, FakeQueue],
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    client, _ = api
+    ingested = _ingest(client).json()
+    await _extract(sessions, ingested["job_run_id"])
+
+    summary = next(
+        o for o in client.get("/api/offers").json() if o["id"] == ingested["capture_id"]
+    )
+    assert summary["assessment_status"] == "none"
+    assert summary["value_score"] is None
+    assert summary["probability_band"] is None
+    assert summary["portfolio_bucket"] is None
+
+
+async def test_unscored_offers_sort_last_by_value_score_in_either_direction(
+    api: tuple[TestClient, FakeQueue],
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    """Micro-decisión acordada con Pablo el 2026-09-13: `NULLS LAST` siempre.
+
+    Un `value_score` nulo no es "el peor valor posible": es "no hay nada con
+    lo que comparar todavía", y no debe ganarle a una nota baja de verdad
+    solo porque el orden se invierta.
+    """
+    client, _ = api
+    scored = await _extracted_and_scored(client, sessions)
+    unscored = _ingest(client, OTRO_ANUNCIO).json()["capture_id"]
+
+    ascending = client.get(
+        "/api/offers", params={"sort": "value_score", "order": "asc"}
+    ).json()
+    assert [o["id"] for o in ascending] == [scored, unscored]
+
+    descending = client.get(
+        "/api/offers", params={"sort": "value_score", "order": "desc"}
+    ).json()
+    assert [o["id"] for o in descending] == [scored, unscored]
+
+
+async def test_the_list_can_filter_by_posting_status(
+    api: tuple[TestClient, FakeQueue],
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    client, _ = api
+    ingested = _ingest(client).json()
+    await _extract(sessions, ingested["job_run_id"], lambda _: good_draft())
+
+    matching = client.get(
+        "/api/offers", params={"posting_status": "unverifiable"}
+    ).json()
+    assert [o["id"] for o in matching] == [ingested["capture_id"]]
+
+    not_matching = client.get(
+        "/api/offers", params={"posting_status": "active_verified"}
+    ).json()
+    assert not_matching == []
+
+
+async def test_the_list_can_filter_by_portfolio_bucket(
+    api: tuple[TestClient, FakeQueue],
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    client, _ = api
+    capture_id = await _extracted_and_scored(client, sessions)
+    bucket = client.get(f"/api/offers/{capture_id}").json()["assessment"][
+        "portfolio_bucket"
+    ]
+    assert bucket is not None
+
+    matching = client.get("/api/offers", params={"portfolio_bucket": bucket}).json()
+    assert [o["id"] for o in matching] == [capture_id]
+
+    other_bucket = next(
+        member.value for member in data_vocab.PortfolioBucket if member.value != bucket
+    )
+    not_matching = client.get(
+        "/api/offers", params={"portfolio_bucket": other_bucket}
+    ).json()
+    assert capture_id not in [o["id"] for o in not_matching]
+
+
+def test_an_invalid_sort_field_is_a_422(api: tuple[TestClient, FakeQueue]) -> None:
+    client, _ = api
+    assert client.get("/api/offers", params={"sort": "not_a_field"}).status_code == 422
+
+
+def test_an_invalid_order_is_a_422(api: tuple[TestClient, FakeQueue]) -> None:
+    client, _ = api
+    assert client.get("/api/offers", params={"order": "sideways"}).status_code == 422
 
 
 async def test_an_offer_without_an_extraction_cannot_be_assessed_yet(

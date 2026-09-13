@@ -22,8 +22,9 @@ deploy key.
   la deploy key de lectura-escritura (`docs/deployment.md` §10).
 - **Fase 3** (pipeline y seguimiento) — en curso desde 2026-09-08, en
   ocho rebanadas. A diferencia de Fase 2, no toca el repositorio privado.
-  Rebanada 1 (modelo de estados de candidatura, `offer_status_events`)
-  cerrada el 2026-09-08.
+  Rebanada 1 (modelo de estados de candidatura) cerrada el 2026-09-08;
+  rebanada 2 (`/ofertas` como tabla densa filtrable y ordenable) cerrada
+  el 2026-09-13.
 
 Qué se integró y por qué en cada fase: `docs/decisions/fase-<n>-*.md`
 (un fichero por fase, ampliado en cada rebanada, sin podar nunca). Estado

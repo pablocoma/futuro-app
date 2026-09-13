@@ -153,4 +153,27 @@ describe("escrituras", () => {
     mockFetch(200, [{ id: "una", title: "Ingeniero de Datos" }]);
     await expect(listOffers()).resolves.toHaveLength(1);
   });
+
+  it("sin filtros ni orden, no manda cadena de consulta", async () => {
+    const fetchMock = mockFetch(200, []);
+    await listOffers();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://api:8000/api/offers",
+      expect.anything(),
+    );
+  });
+
+  it("traduce el filtro y el orden de la tabla densa a query params", async () => {
+    const fetchMock = mockFetch(200, []);
+    await listOffers({
+      status: "submitted",
+      portfolio_bucket: "realistic",
+      sort: "value_score",
+      order: "asc",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://api:8000/api/offers?status=submitted&portfolio_bucket=realistic&sort=value_score&order=asc",
+      expect.anything(),
+    );
+  });
 });

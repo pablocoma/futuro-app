@@ -271,6 +271,33 @@ export type OfferSummary = {
   posting_status: string | null;
   extraction_status: ExtractionStatus;
   status: ApplicationStatus;
+  /**
+   * El assessment vigente, para la tabla densa del Pipeline (Fase 3,
+   * rebanada 2). `assessment_status` viaja aparte de `value_score` porque un
+   * `value_score` nulo es ambiguo entre «sin puntuar», «en cola» y «falló»,
+   * y la pantalla tiene que poder decir cuál de las tres es.
+   */
+  assessment_status: ExtractionStatus;
+  value_score: string | null;
+  probability_band: "high" | "medium" | "low" | "very_low" | null;
+  portfolio_bucket:
+    | "realistic"
+    | "realistic_stretch"
+    | "aspirational"
+    | "experimental"
+    | "discard"
+    | null;
+};
+
+export type OfferSortField = "captured_at" | "value_score" | "title" | "company";
+export type OfferSortOrder = "asc" | "desc";
+
+export type OfferListParams = {
+  status?: ApplicationStatus;
+  posting_status?: string;
+  portfolio_bucket?: string;
+  sort?: OfferSortField;
+  order?: OfferSortOrder;
 };
 
 export type IngestResult = {
@@ -368,8 +395,15 @@ export function getCurrentUser(): Promise<CurrentUser | null> {
   return apiGet<CurrentUser>("/api/auth/me");
 }
 
-export function listOffers(): Promise<OfferSummary[] | null> {
-  return apiGet<OfferSummary[]>("/api/offers");
+export function listOffers(
+  params: OfferListParams = {},
+): Promise<OfferSummary[] | null> {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value) query.set(key, value);
+  }
+  const qs = query.toString();
+  return apiGet<OfferSummary[]>(`/api/offers${qs ? `?${qs}` : ""}`);
 }
 
 export function getOffer(id: string): Promise<Offer | null> {

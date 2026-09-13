@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { Composition } from "@/components/Composition";
 import { EvidenceDetail, EvidenceMark } from "@/components/Evidence";
 import { Refresher } from "@/components/Refresher";
+import { State } from "@/components/State";
 import type { Assessment, Field, Gate, Offer, RequirementMatch } from "@/lib/api";
 import { getOffer } from "@/lib/api";
 import {
@@ -608,35 +609,6 @@ function Scoring({
         </div>
       </Section>
     </>
-  );
-}
-
-/** Un estado: texto con subrayado de color, no una pastilla de fondo. */
-function State({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string;
-  tone: "pos" | "neg" | "acc";
-}) {
-  const underline = {
-    pos: "decoration-pos",
-    neg: "decoration-neg",
-    acc: "decoration-acc",
-  }[tone];
-  return (
-    <div>
-      <dt className="font-mono text-xs uppercase tracking-widest text-ink3">
-        {label}
-      </dt>
-      <dd
-        className={`mt-1 text-sm underline decoration-2 underline-offset-4 ${underline}`}
-      >
-        {value}
-      </dd>
-    </div>
   );
 }
 

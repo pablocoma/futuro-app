@@ -15,21 +15,28 @@ from __future__ import annotations
 import hashlib
 import uuid
 from collections.abc import Sequence
-from datetime import date
+from datetime import date, datetime
+from decimal import Decimal
+from typing import Any, Literal, NamedTuple
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
+from futuro_api.data_repo import vocabularies as data_vocab
 from futuro_api.models import (
     Company,
     OfferAnomaly,
+    OfferAssessment,
     OfferCapture,
     OfferExtraction,
     OfferRequirement,
+    OfferStatusEvent,
 )
 from futuro_api.offers import rules
 from futuro_api.offers import vocabularies as vocab
+from futuro_api.pipeline.vocabularies import DEFAULT_STATUS, ApplicationStatus
 
 
 def sha256_of(raw_text: str) -> str:
@@ -230,55 +237,171 @@ async def extraction_versions(
     )
 
 
-async def list_captures(
-    session: AsyncSession, *, limit: int = 50, before: uuid.UUID | None = None
-) -> Sequence[OfferCapture]:
-    """Capturas de la más reciente a la más antigua.
+SortField = Literal["captured_at", "value_score", "title", "company"]
+SortOrder = Literal["asc", "desc"]
 
-    `before` pagina por la captura que se pasó: se usa su `captured_at` en
-    lugar de un desplazamiento, que se descuadra en cuanto entra una oferta
-    nueva mientras alguien mira la segunda página.
+
+class OfferListRow(NamedTuple):
+    """Una fila de la pantalla Pipeline: solo columnas, no entidades enteras.
+
+    Cargar `OfferExtraction`/`OfferAssessment` completos -con sus relaciones
+    `selectin`- para pintar siete columnas de una tabla sería pagar por
+    `requirements`, `dimensions`, `gates`... de las cien filas de la página,
+    y nada de eso se enseña aquí. `extraction_id`/`assessment_id` viajan
+    solo como el «existe o no» que pide `views.status_of`, no para leer nada
+    más de ellos.
     """
-    query = sa.select(OfferCapture).order_by(
-        OfferCapture.captured_at.desc(), OfferCapture.id.desc()
-    )
-    if before is not None:
-        anchor = (
-            sa.select(OfferCapture.captured_at, OfferCapture.id)
-            .where(OfferCapture.id == before)
-            .subquery()
-        )
-        query = query.where(
-            sa.tuple_(OfferCapture.captured_at, OfferCapture.id)
-            < sa.tuple_(anchor.c.captured_at, anchor.c.id)
-        )
-    return (await session.execute(query.limit(limit))).scalars().all()
+
+    id: uuid.UUID
+    captured_at: datetime
+    title: str | None
+    company: str | None
+    posting_status: vocab.PostingStatus | None
+    extraction_id: uuid.UUID | None
+    assessment_id: uuid.UUID | None
+    value_score: Decimal | None
+    probability_band: data_vocab.ProbabilityBand | None
+    portfolio_bucket: data_vocab.PortfolioBucket | None
+    status: ApplicationStatus
 
 
-async def current_extractions_for(
-    session: AsyncSession, capture_ids: Sequence[uuid.UUID]
-) -> dict[uuid.UUID, OfferExtraction]:
-    """La extracción vigente de cada captura, en una sola consulta.
+async def list_offer_rows(
+    session: AsyncSession,
+    *,
+    limit: int,
+    status: ApplicationStatus | None = None,
+    posting_status: vocab.PostingStatus | None = None,
+    portfolio_bucket: data_vocab.PortfolioBucket | None = None,
+    sort: SortField = "captured_at",
+    order: SortOrder = "desc",
+) -> Sequence[OfferListRow]:
+    """La tabla densa del Pipeline: filtro, orden y límite en una sola consulta.
 
-    `DISTINCT ON` con el mismo orden que `current_extraction`, para que el
-    listado y el detalle no puedan discrepar sobre cuál es la vigente.
+    Sin paginación por cursor -micro-decisión acordada con Pablo el
+    2026-09-13: todo cabe en el límite de `MAX_PAGE`, y filtrar u ordenar
+    después de traer una página fija de capturas por `captured_at`
+    descuadraría el resultado, que es justo lo que un `before` evitaba para
+    ese único orden-. Con filtro y orden configurables, el corte tiene que
+    hacerse en la propia consulta SQL: de ahí que esto ya no sea "capturas,
+    con la extracción vigente pegada en Python" sino un único `LEFT JOIN`
+    contra la extracción, el assessment y el estado vigentes de cada uno,
+    cada uno resuelto con el mismo `DISTINCT ON` que su propio módulo usa
+    para no discrepar con el detalle de una oferta.
     """
-    if not capture_ids:
-        return {}
-    rows = (
-        (
-            await session.execute(
-                sa.select(OfferExtraction)
-                .where(OfferExtraction.capture_id.in_(capture_ids))
-                .distinct(OfferExtraction.capture_id)
-                .order_by(
-                    OfferExtraction.capture_id,
-                    OfferExtraction.extracted_at.desc(),
-                    OfferExtraction.id.desc(),
-                )
-            )
+    current_extraction = (
+        sa.select(
+            OfferExtraction.capture_id.label("capture_id"),
+            OfferExtraction.id.label("extraction_id"),
+            OfferExtraction.title.label("title"),
+            OfferExtraction.posting_status.label("posting_status"),
+            OfferExtraction.posting_company_id.label("posting_company_id"),
+            OfferExtraction.employer_company_id.label("employer_company_id"),
         )
-        .scalars()
-        .all()
+        .distinct(OfferExtraction.capture_id)
+        .order_by(
+            OfferExtraction.capture_id,
+            OfferExtraction.extracted_at.desc(),
+            OfferExtraction.id.desc(),
+        )
+        .subquery()
     )
-    return {row.capture_id: row for row in rows}
+    current_assessment = (
+        sa.select(
+            OfferAssessment.extraction_id.label("extraction_id"),
+            OfferAssessment.id.label("assessment_id"),
+            OfferAssessment.value_score.label("value_score"),
+            OfferAssessment.probability_band.label("probability_band"),
+            OfferAssessment.portfolio_bucket.label("portfolio_bucket"),
+        )
+        .distinct(OfferAssessment.extraction_id)
+        .order_by(
+            OfferAssessment.extraction_id,
+            OfferAssessment.assessed_at.desc(),
+            OfferAssessment.id.desc(),
+        )
+        .subquery()
+    )
+    current_status = (
+        sa.select(
+            OfferStatusEvent.capture_id.label("capture_id"),
+            OfferStatusEvent.status.label("status"),
+        )
+        .distinct(OfferStatusEvent.capture_id)
+        .order_by(
+            OfferStatusEvent.capture_id,
+            OfferStatusEvent.occurred_at.desc(),
+            OfferStatusEvent.id.desc(),
+        )
+        .subquery()
+    )
+
+    # El empleador final manda sobre quien publica -es la empresa para la
+    # que se trabajaría, lo que interesa de un vistazo-, mismo criterio que
+    # el listado anterior aplicaba en Python.
+    posting_company = aliased(Company)
+    employer_company = aliased(Company)
+    company_name = sa.func.coalesce(employer_company.name, posting_company.name)
+    status_column = sa.func.coalesce(current_status.c.status, DEFAULT_STATUS)
+
+    query = (
+        sa.select(
+            OfferCapture.id.label("id"),
+            OfferCapture.captured_at.label("captured_at"),
+            current_extraction.c.title,
+            company_name.label("company"),
+            current_extraction.c.posting_status,
+            current_extraction.c.extraction_id,
+            current_assessment.c.assessment_id,
+            current_assessment.c.value_score,
+            current_assessment.c.probability_band,
+            current_assessment.c.portfolio_bucket,
+            status_column.label("status"),
+        )
+        .select_from(OfferCapture)
+        .outerjoin(
+            current_extraction, current_extraction.c.capture_id == OfferCapture.id
+        )
+        .outerjoin(
+            current_assessment,
+            current_assessment.c.extraction_id == current_extraction.c.extraction_id,
+        )
+        .outerjoin(
+            posting_company,
+            posting_company.id == current_extraction.c.posting_company_id,
+        )
+        .outerjoin(
+            employer_company,
+            employer_company.id == current_extraction.c.employer_company_id,
+        )
+        .outerjoin(current_status, current_status.c.capture_id == OfferCapture.id)
+    )
+
+    if status is not None:
+        query = query.where(status_column == status)
+    if posting_status is not None:
+        query = query.where(current_extraction.c.posting_status == posting_status)
+    if portfolio_bucket is not None:
+        query = query.where(current_assessment.c.portfolio_bucket == portfolio_bucket)
+
+    # `Any` y no `sa.ColumnElement[Any]`: `OfferCapture.captured_at` es un
+    # `InstrumentedAttribute`, no un `ColumnElement`, a ojos de los stubs de
+    # tipos de SQLAlchemy, aunque las dos cosas se comporten igual en
+    # `sa.asc`/`sa.desc`.
+    sort_columns: dict[SortField, Any] = {
+        "captured_at": OfferCapture.captured_at,
+        "value_score": current_assessment.c.value_score,
+        "title": current_extraction.c.title,
+        "company": company_name,
+    }
+    direction = sa.asc if order == "asc" else sa.desc
+    ordered = direction(sort_columns[sort])
+    if sort == "value_score":
+        # Sin puntuar va siempre al final, sea cual sea el sentido del
+        # orden: micro-decisión acordada con Pablo el 2026-09-13, para que
+        # "ordenar de peor a mejor" no ponga las ofertas sin puntuar por
+        # delante de las que sí puntúan bajo.
+        ordered = sa.nulls_last(ordered)
+    query = query.order_by(ordered, OfferCapture.id.desc()).limit(limit)
+
+    rows = (await session.execute(query)).all()
+    return [OfferListRow(*row) for row in rows]

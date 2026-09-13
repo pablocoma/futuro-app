@@ -116,6 +116,19 @@ export const PROBABILITY_LABELS: Record<string, string> = {
   very_low: "muy baja",
 };
 
+/**
+ * Estado del anuncio (`offers/vocabularies.py::PostingStatus`), para la
+ * columna "Anuncio" del Pipeline (Fase 3, rebanada 2). De un texto pegado
+ * nunca sale `active_verified` -exige una comprobación que M1 no hace-,
+ * pero el vocabulario sí lo declara y la etiqueta existe por si algún día
+ * hay un camino que sí compruebe.
+ */
+export const POSTING_STATUS_LABELS: Record<string, string> = {
+  active_verified: "activo, comprobado",
+  expired: "expirado",
+  unverifiable: "no comprobable",
+};
+
 export const MATCH_LABELS: Record<string, string> = {
   meets: "cumple",
   partial: "parcial",
