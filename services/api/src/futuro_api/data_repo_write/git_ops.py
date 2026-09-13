@@ -17,10 +17,15 @@ El deploy nunca lo toca.
 **Cada invocación de `git` lleva su propio `-c safe.directory=*`, y nada de
 `HOME` ni configuración global.** El directorio de trabajo es un volumen
 montado desde el host, con el dueño del host y no el `uid` del contenedor;
-sin esto, git moderno se niega a operar ("detected dubious ownership").
-Acotarlo a `*` por invocación -no en un `.gitconfig` global- es tan seguro
-como acotarlo al path exacto, porque cada llamada ya fija con `-C` cuál es
-el único repositorio sobre el que opera.
+sin esto, git moderno se niega a operar ("detected dubious ownership"). El
+mismo problema alcanza al remoto en `ensure_clone`, no solo al destino: en
+desarrollo y en CI es un bare local -otro volumen del host, mismo dueño
+ajeno al `uid` del contenedor-, así que el primer `clone` necesita el flag
+tanto como `pull`/`commit`/`push`, aunque no fije ningún `-C` porque el
+destino todavía no existe como repositorio. Acotarlo a `*` por invocación
+-no en un `.gitconfig` global- es tan seguro como acotarlo al path exacto:
+no hay sesión que lo reutilice para otra cosa, y en producción el remoto
+es una URL de GitHub por SSH, ajena por completo a esta comprobación.
 
 **Un conflicto aborta y no fuerza nada.** Ni en el `pull --rebase` ni en el
 `push`: la disciplina que pide `ARCHITECTURE.md` §5. El único intento de
@@ -137,9 +142,9 @@ def lock_for(path: Path) -> asyncio.Lock:
 def _run(
     path: Path | None, *args: str, env: dict[str, str] | None = None
 ) -> subprocess.CompletedProcess[str]:
-    command = ["git"]
+    command = ["git", "-c", "safe.directory=*"]
     if path is not None:
-        command += ["-C", str(path), "-c", "safe.directory=*"]
+        command += ["-C", str(path)]
     command += list(args)
     full_env = {**os.environ, **env} if env else None
     return subprocess.run(command, capture_output=True, text=True, env=full_env)
